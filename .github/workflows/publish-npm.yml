@@ -1,0 +1,15 @@
+name: Release - Publish npm
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    uses: 1pizzateam/coding-pal/.github/workflows/pipeline-publish-npm.yml@main
+    secrets: inherit

@@ -109,6 +109,16 @@ export function evaluateFaceDeformation(
   const jm = _jawMat.toArray();
   const nm = _neckMat.toArray();
 
+  const elm0 = elm[0], elm1 = elm[1], elm2 = elm[2];
+  const elm4 = elm[4], elm5 = elm[5], elm6 = elm[6];
+  const elm8 = elm[8], elm9 = elm[9], elm10 = elm[10];
+  const elm12 = elm[12], elm13 = elm[13], elm14 = elm[14];
+
+  const erm0 = erm[0], erm1 = erm[1], erm2 = erm[2];
+  const erm4 = erm[4], erm5 = erm[5], erm6 = erm[6];
+  const erm8 = erm[8], erm9 = erm[9], erm10 = erm[10];
+  const erm12 = erm[12], erm13 = erm[13], erm14 = erm[14];
+
   const jm0 = jm[0], jm1 = jm[1], jm2 = jm[2];
   const jm4 = jm[4], jm5 = jm[5], jm6 = jm[6];
   const jm8 = jm[8], jm9 = jm[9], jm10 = jm[10];
@@ -142,24 +152,24 @@ export function evaluateFaceDeformation(
 
     // Eyeball local rotations around eyeLeft / eyeRight pivot
     if (doEyeL) {
-      const rx = elm[0] * px + elm[4] * py + elm[8] * pz + elm[12];
-      const ry = elm[1] * px + elm[5] * py + elm[9] * pz + elm[13];
-      const rz = elm[2] * px + elm[6] * py + elm[10] * pz + elm[14];
+      const rx = elm0 * px + elm4 * py + elm8 * pz + elm12;
+      const ry = elm1 * px + elm5 * py + elm9 * pz + elm13;
+      const rz = elm2 * px + elm6 * py + elm10 * pz + elm14;
       px = rx; py = ry; pz = rz;
 
-      const rnx = elm[0] * nx + elm[4] * ny + elm[8] * nz;
-      const rny = elm[1] * nx + elm[5] * ny + elm[9] * nz;
-      const rnz = elm[2] * nx + elm[6] * ny + elm[10] * nz;
+      const rnx = elm0 * nx + elm4 * ny + elm8 * nz;
+      const rny = elm1 * nx + elm5 * ny + elm9 * nz;
+      const rnz = elm2 * nx + elm6 * ny + elm10 * nz;
       nx = rnx; ny = rny; nz = rnz;
     } else if (doEyeR) {
-      const rx = erm[0] * px + erm[4] * py + erm[8] * pz + erm[12];
-      const ry = erm[1] * px + erm[5] * py + erm[9] * pz + erm[13];
-      const rz = erm[2] * px + erm[6] * py + erm[10] * pz + erm[14];
+      const rx = erm0 * px + erm4 * py + erm8 * pz + erm12;
+      const ry = erm1 * px + erm5 * py + erm9 * pz + erm13;
+      const rz = erm2 * px + erm6 * py + erm10 * pz + erm14;
       px = rx; py = ry; pz = rz;
 
-      const rnx = erm[0] * nx + erm[4] * ny + erm[8] * nz;
-      const rny = erm[1] * nx + erm[5] * ny + erm[9] * nz;
-      const rnz = erm[2] * nx + erm[6] * ny + erm[10] * nz;
+      const rnx = erm0 * nx + erm4 * ny + erm8 * nz;
+      const rny = erm1 * nx + erm5 * ny + erm9 * nz;
+      const rnz = erm2 * nx + erm6 * ny + erm10 * nz;
       nx = rnx; ny = rny; nz = rnz;
     }
 
@@ -186,10 +196,10 @@ export function evaluateFaceDeformation(
       }
     }
 
-    // Neck rotation around cervical pivot (smoothly weighted from base collar y=-9.8 up to y=-7.2)
+    // Neck rotation around cervical pivot (smoothly weighted from base collar y=-9.8 up to y=-5.8)
     if (hasNeck) {
       const baseY = basePositions[idx + 1];
-      if (region !== FACE_REGION_IDS.skin || baseY >= -7.2) {
+      if (region !== FACE_REGION_IDS.skin || baseY >= -5.8) {
         const rx = nm0 * px + nm4 * py + nm8 * pz + nm12;
         const ry = nm1 * px + nm5 * py + nm9 * pz + nm13;
         const rz = nm2 * px + nm6 * py + nm10 * pz + nm14;
@@ -200,7 +210,7 @@ export function evaluateFaceDeformation(
         const rnz = nm2 * nx + nm6 * ny + nm10 * nz;
         nx = rnx; ny = rny; nz = rnz;
       } else if (baseY > -9.8) {
-        const neckWeight = Utils.smoothstep(-9.8, -7.2, baseY);
+        const neckWeight = Utils.smoothstep(-9.8, -5.8, baseY);
         const rx = nm0 * px + nm4 * py + nm8 * pz + nm12;
         const ry = nm1 * px + nm5 * py + nm9 * pz + nm13;
         const rz = nm2 * px + nm6 * py + nm10 * pz + nm14;
@@ -258,41 +268,206 @@ export function generateFaceAtlasPixels(
       const pIdx = (y * size + x) * 4;
 
       if (v < 0.75) {
-        // Upper 75% (v: 0..0.75, u: 0..1): Facial Skin & Vermilion Lips
-        // Note: baseHead maps u in [0.01..0.99] (center = 0.5) and v in [0.02..0.74] (crown = 0.02, neck = 0.74)
-        const su = u; // 0..1 across azimuth (0.5 = anterior nose/mouth midline)
-        const sv = 1.0 - v / 0.75; // 0 = neck base, 1 = crown
+        // Upper 75% (v: 0..0.75, u: 0..1): Facial Skin, Hairline, Brows, Eyelids, Nose & Lips
+        // In baseHead: u_uv = 0.5 + uGrid * 0.48, v_uv = 0.74 - sv * 0.72 where sv = (y + 11.0) / 21.5
+        const uGrid = (u - 0.5) / 0.48;
+        const absU = Math.abs(uGrid);
+        const sv = Utils.clamp((0.74 - v) / 0.72, 0.0, 1.0);
+        const yHead = Utils.lerp(-11.0, 10.5, sv);
 
-        const centerDist = Math.abs(su - 0.5) * 2.0;
-        const shade = Utils.smoothstep(0.0, 0.22, sv) * (1.0 - centerDist * 0.28);
+        const shade = Utils.smoothstep(0.0, 0.25, sv) * (1.0 - absU * 0.22);
         col.setScalar(
           Utils.lerp(shadow.x, skin.x, shade),
           Utils.lerp(shadow.y, skin.y, shade),
           Utils.lerp(shadow.z, skin.z, shade)
         );
 
-        // Subtle pore noise
-        const pore = rng.float(-0.012, 0.012);
+        // Subtle skin pore variation
+        const pore = rng.float(-0.010, 0.010);
         col.addScalar(pore);
 
-        // Cheek & nose warmth around mid-face (sv ~ 0.45..0.62)
-        const cheekWarmth = Math.exp(-Math.pow((sv - 0.52) / 0.12, 2)) * (1.0 - centerDist * 0.5);
-        col.x += cheekWarmth * 0.045;
-        col.y -= cheekWarmth * 0.015;
+        // Submental under-chin & neck transition shadow (yHead around -6.6..-5.5)
+        const submentalShadow =
+          Math.exp(-Math.pow((yHead - -6.1) / 0.75, 2)) *
+          Math.exp(-Math.pow(absU / 0.34, 2));
+        col.scale(1.0 - submentalShadow * 0.26);
 
-        // Eye socket ambient occlusion around (su ~ 0.40 & 0.60, sv ~ 0.56)
-        const dEyeL = Math.hypot((su - 0.40) * 2.8, (sv - 0.56) * 3.2);
-        const dEyeR = Math.hypot((su - 0.60) * 2.8, (sv - 0.56) * 3.2);
-        const socketAO = Math.exp(-dEyeL * dEyeL * 4.5) + Math.exp(-dEyeR * dEyeR * 4.5);
-        col.scale(1.0 - socketAO * 0.22);
+        // Subtle lower-face / jawline beard-stubble cool tone (yHead in -6.2..-1.8, anterior)
+        const jawStubble =
+          Utils.smoothstep(-6.4, -5.2, yHead) *
+          Utils.smoothstep(-1.5, -2.8, yHead) *
+          Utils.smoothstep(0.38, 0.16, absU) *
+          (1.0 - Math.exp(-Math.pow((yHead - -3.10) / 0.65, 2)) * Math.exp(-Math.pow(absU / 0.09, 2)));
+        if (jawStubble > 0.01) {
+          const stubbleNoise = 0.85 + 0.15 * Math.sin(uGrid * 190.0 + yHead * 45.0);
+          const stW = jawStubble * 0.14 * stubbleNoise;
+          col.x = Utils.lerp(col.x, brow.x * 0.85, stW);
+          col.y = Utils.lerp(col.y, brow.y * 0.88, stW);
+          col.z = Utils.lerp(col.z, brow.z * 0.95, stW);
+        }
 
-        // Vermilion lip zone around (su ~ 0.5, sv ~ 0.34)
-        const dLip = Math.hypot((su - 0.5) / 0.075, (sv - 0.34) / 0.042);
-        if (dLip < 1.3) {
-          const lipW = Utils.smoothstep(1.3, 0.45, dLip);
-          col.x = Utils.lerp(col.x, lip.x, lipW);
-          col.y = Utils.lerp(col.y, lip.y, lipW);
-          col.z = Utils.lerp(col.z, lip.z, lipW);
+        // Cheek & nasal warmth around mid-face (yHead in -1.2..2.0)
+        const cheekWarmth =
+          Math.exp(-Math.pow((yHead - 0.35) / 1.65, 2)) *
+          Math.exp(-Math.pow((absU - 0.16) / 0.14, 2));
+        col.x += cheekWarmth * 0.055;
+        col.y -= cheekWarmth * 0.012;
+        col.z -= cheekWarmth * 0.015;
+
+        // Nasolabial fold & philtrum shading
+        const philtrumGroove =
+          Math.exp(-Math.pow(absU / 0.016, 2)) *
+          Math.exp(-Math.pow((yHead - -1.95) / 0.55, 2));
+        const philtrumColumns =
+          Math.exp(-Math.pow((absU - 0.024) / 0.010, 2)) *
+          Math.exp(-Math.pow((yHead - -1.95) / 0.55, 2));
+        col.scale(1.0 - philtrumGroove * 0.14 + philtrumColumns * 0.05);
+
+        const nlTargetU = 0.062 + Math.max(0, -0.9 - yHead) * 0.022;
+        const nasolabial =
+          Math.exp(-Math.pow((absU - nlTargetU) / 0.014, 2)) *
+          Utils.smoothstep(-0.7, -1.3, yHead) *
+          Utils.smoothstep(-3.6, -2.6, yHead);
+        col.scale(1.0 - nasolabial * 0.18);
+
+        // Nasal bridge highlight, alar crease, and dark nostril cavities
+        const noseBridgeHighlight =
+          Math.exp(-Math.pow(absU / 0.022, 2)) *
+          Utils.smoothstep(-0.85, -0.35, yHead) *
+          Utils.smoothstep(2.6, 1.5, yHead);
+        col.addScalar(noseBridgeHighlight * 0.055);
+
+        const alarShadow =
+          Math.exp(-Math.pow((absU - 0.064) / 0.016, 2)) *
+          Math.exp(-Math.pow((yHead - -0.92) / 0.42, 2));
+        col.scale(1.0 - alarShadow * 0.24);
+
+        const nostrilDark =
+          Math.exp(-Math.pow((absU - 0.035) / 0.016, 2)) *
+          Math.exp(-Math.pow((yHead - -1.16) / 0.22, 2));
+        if (nostrilDark > 0.01) {
+          const nW = Utils.clamp(nostrilDark * 0.88, 0.0, 0.88);
+          col.x = Utils.lerp(col.x, 0.08, nW);
+          col.y = Utils.lerp(col.y, 0.04, nW);
+          col.z = Utils.lerp(col.z, 0.04, nW);
+        }
+
+        // Vermilion upper & lower lips + Cupid's bow + oral stomion crease (yHead ~ -3.10)
+        const lipArch = Math.max(0, 1.0 - Math.pow(absU / 0.095, 2));
+        if (lipArch > 0.0 && yHead > -3.85 && yHead < -2.35) {
+          const cupidDip = 0.10 * Math.exp(-Math.pow(absU / 0.018, 2));
+          const cupidPeak = 0.12 * Math.exp(-Math.pow((absU - 0.028) / 0.018, 2));
+          const upperBorderY = -3.10 + (0.52 + cupidPeak - cupidDip) * lipArch;
+          const lowerBorderY = -3.10 - 0.62 * lipArch;
+
+          if (yHead >= lowerBorderY && yHead <= upperBorderY) {
+            const distToEdge = Math.min(upperBorderY - yHead, yHead - lowerBorderY);
+            const lipW = Utils.smoothstep(0.0, 0.16, distToEdge) * Utils.smoothstep(0.0, 0.25, lipArch);
+            const isUpperLip = yHead >= -3.10;
+            // Upper lip angles downward (slightly darker), lower lip catches light (specular highlight)
+            const lipShade = isUpperLip
+              ? 0.84
+              : 1.04 + 0.14 * Math.exp(-Math.pow((yHead - -3.38) / 0.16, 2)) * Math.exp(-Math.pow(absU / 0.045, 2));
+            col.x = Utils.lerp(col.x, lip.x * lipShade, lipW);
+            col.y = Utils.lerp(col.y, lip.y * lipShade, lipW);
+            col.z = Utils.lerp(col.z, lip.z * lipShade, lipW);
+          }
+
+          // Crisp dark oral stomion parting line at yHead = -3.10
+          const stomionLine =
+            Math.exp(-Math.pow((yHead - -3.10) / 0.075, 2)) *
+            Utils.smoothstep(0.0, 0.15, lipArch);
+          if (stomionLine > 0.01) {
+            const stLineW = Utils.clamp(stomionLine * 0.82, 0.0, 0.82);
+            col.x = Utils.lerp(col.x, 0.12, stLineW);
+            col.y = Utils.lerp(col.y, 0.04, stLineW);
+            col.z = Utils.lerp(col.z, 0.05, stLineW);
+          }
+        }
+
+        // Orbital socket shading, eyelids, upper eyelash line & supra-tarsal crease (eye center: absU = 0.123, yHead = 1.85)
+        const dSocket = Math.hypot((absU - 0.123) / 0.075, (yHead - 1.92) / 0.95);
+        if (dSocket < 1.5) {
+          const socketAO = Math.exp(-dSocket * dSocket * 1.65);
+          col.scale(1.0 - socketAO * 0.18);
+        }
+
+        const eyeArchX = Math.max(0, 1.0 - Math.pow((absU - 0.123) / 0.062, 2));
+        if (eyeArchX > 0.0) {
+          // Dark upper eyelash margin
+          const upperLashY = 1.85 + 0.36 * eyeArchX;
+          const lashW = Math.exp(-Math.pow((yHead - upperLashY) / 0.09, 2)) * Utils.smoothstep(0.0, 0.2, eyeArchX);
+          if (lashW > 0.01) {
+            col.x = Utils.lerp(col.x, brow.x * 0.35, lashW * 0.85);
+            col.y = Utils.lerp(col.y, brow.y * 0.35, lashW * 0.85);
+            col.z = Utils.lerp(col.z, brow.z * 0.35, lashW * 0.85);
+          }
+          // Supra-tarsal upper eyelid fold crease
+          const foldY = 1.85 + 0.68 * eyeArchX;
+          const foldW = Math.exp(-Math.pow((yHead - foldY) / 0.08, 2)) * Utils.smoothstep(0.0, 0.25, eyeArchX);
+          col.scale(1.0 - foldW * 0.28);
+
+          // Lower eyelid rim shadow
+          const lowerRimY = 1.85 - 0.36 * eyeArchX;
+          const lowerW = Math.exp(-Math.pow((yHead - lowerRimY) / 0.09, 2)) * Utils.smoothstep(0.0, 0.2, eyeArchX);
+          col.scale(1.0 - lowerW * 0.22);
+        }
+
+        // Painted eyebrow hair bed (absU in 0.040..0.198, yHead ~ 3.15)
+        if (absU > 0.032 && absU < 0.210 && yHead > 2.65 && yHead < 3.75) {
+          const browT = Utils.clamp((absU - 0.038) / 0.160, 0.0, 1.0);
+          const browCenterY = 3.05 + 0.26 * Math.sin(browT * Math.PI * 0.85);
+          const browHalfH = 0.24 * (1.0 - 0.45 * Math.pow(browT, 1.6));
+          const dBrowY = Math.abs(yHead - browCenterY) / Math.max(0.05, browHalfH);
+          if (dBrowY < 1.35) {
+            const browEndFade = Utils.smoothstep(0.0, 0.12, browT) * Utils.smoothstep(1.0, 0.82, browT);
+            const browW = Utils.smoothstep(1.35, 0.25, dBrowY) * browEndFade;
+            const browStroke = 0.78 + 0.22 * Math.sin((absU * 260.0) - (yHead * 32.0));
+            col.x = Utils.lerp(col.x, brow.x * browStroke, browW * 0.88);
+            col.y = Utils.lerp(col.y, brow.y * browStroke, browW * 0.88);
+            col.z = Utils.lerp(col.z, brow.z * browStroke, browW * 0.88);
+          }
+        }
+
+        // Ear concha & antihelix shading (absU around 0.46..0.54, yHead in -1.3..2.1)
+        const earConcha =
+          Math.exp(-Math.pow((absU - 0.50) / 0.035, 2)) *
+          Math.exp(-Math.pow((yHead - 0.35) / 1.05, 2));
+        col.scale(1.0 - earConcha * 0.24);
+
+        // Sculpted Haircut, Forehead Hairline, Sideburns & Nape Hair
+        const foreheadHairlineY =
+          6.35 -
+          0.32 * Math.exp(-Math.pow(absU / 0.05, 2)) +
+          0.55 * Math.exp(-Math.pow((absU - 0.19) / 0.07, 2));
+        const foreheadHair =
+          Utils.smoothstep(foreheadHairlineY - 0.30, foreheadHairlineY + 0.22, yHead) *
+          Utils.smoothstep(0.40, 0.26, absU);
+        const sideburnHair =
+          Utils.smoothstep(0.28, 0.34, absU) *
+          Utils.smoothstep(0.47, 0.43, absU) *
+          Utils.smoothstep(-0.15, 0.45, yHead) *
+          Utils.smoothstep(7.5, 5.0, yHead);
+        const backScalpHair =
+          Utils.smoothstep(0.38, 0.46, absU) *
+          Utils.smoothstep(-3.8, -3.1, yHead);
+        const crownCapHair = Utils.smoothstep(6.45, 7.05, yHead);
+        const hairMask = Utils.clamp(
+          Math.max(foreheadHair, sideburnHair, backScalpHair, crownCapHair),
+          0.0,
+          1.0
+        );
+        if (hairMask > 0.01) {
+          const strand =
+            0.84 +
+            0.16 * Math.sin(uGrid * 185.0 + yHead * 14.0) * Math.cos(yHead * 26.0);
+          const crownSpec = 1.0 + 0.18 * Utils.smoothstep(5.5, 8.8, yHead) * (1.0 - absU * 0.5);
+          const hR = brow.x * strand * crownSpec;
+          const hG = brow.y * strand * crownSpec;
+          const hB = brow.z * strand * crownSpec;
+          col.x = Utils.lerp(col.x, hR, hairMask);
+          col.y = Utils.lerp(col.y, hG, hairMask);
+          col.z = Utils.lerp(col.z, hB, hairMask);
         }
       } else if (u < 0.50) {
         // Bottom-Left (u: 0..0.50, v: 0.75..1.0): Left Eyeball (0.02..0.24) & Right Eyeball (0.26..0.48)

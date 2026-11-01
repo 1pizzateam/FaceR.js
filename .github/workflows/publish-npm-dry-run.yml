@@ -1,0 +1,14 @@
+name: Release - Publish npm (dry run)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dry-run:
+    uses: 1pizzateam/coding-pal/.github/workflows/pipeline-publish-npm.yml@main
+    with:
+      dry_run: true
+    secrets: inherit

@@ -191,104 +191,181 @@ function shapeAnatomicalHeadPoint(u, v, target) {
     const azimuth = u * Trigo.pi;
     const sinAz = Trigo.sinePrecise(azimuth);
     const cosAz = Trigo.cosinePrecise(azimuth);
-    const y = Utils.lerp(-11.5, 13.5, v);
-    let rx = 7.6;
-    let rz = 8.8;
-    let zCenter = -0.6;
-    if (v < 0.18) {
-        const t = Utils.normalize(v, 0, 0.18);
-        const s = Utils.smoothstep(0, 1, t);
-        rx = Utils.lerp(4.4, 6.4, s);
-        rz = Utils.lerp(4.6, 6.6, s);
-        zCenter = Utils.lerp(-1.8, -0.8, s);
-    }
-    else if (v < 0.52) {
-        const t = Utils.normalize(v, 0.18, 0.52);
-        const s = Utils.smoothstep(0, 1, t);
-        rx = Utils.lerp(6.0, 7.65, s);
-        rz = Utils.lerp(6.8, 8.6, s);
-        zCenter = Utils.lerp(-0.5, -0.3, s);
-    }
-    else if (v < 0.78) {
-        const t = Utils.normalize(v, 0.52, 0.78);
-        rx = Utils.lerp(7.65, 7.45, t);
-        rz = Utils.lerp(8.6, 8.95, t);
-        zCenter = Utils.lerp(-0.3, -0.75, t);
+    const absU = Math.abs(u);
+    const signU = u >= 0 ? 1 : -1;
+    let x = 0;
+    let y = 0;
+    let z = 0;
+    if (v < 0.20) {
+        const t = Utils.normalize(v, 0.0, 0.20);
+        y = Utils.lerp(-11, -5.8, t);
+        const collarFlare = Math.pow(1.0 - t, 1.8);
+        const rx = Utils.lerp(3.55, 4.45, collarFlare);
+        const rz = Utils.lerp(3.75, 4.55, collarFlare);
+        const zCenter = Utils.lerp(-1.65, -1.35, t);
+        const throatBulge = Math.max(0, cosAz) * 0.32 * Math.sin(t * Trigo.pi);
+        x = sinAz * rx;
+        z = zCenter + cosAz * rz + throatBulge;
     }
     else {
-        const t = Utils.normalize(v, 0.78, 1.0);
-        const dome = Trigo.cosinePrecise(t * Trigo.halfpi);
-        const softDome = Math.pow(Math.max(0, dome), 0.72);
-        rx = 7.45 * softDome;
-        rz = 8.95 * softDome;
-        zCenter = Utils.lerp(-0.75, -1.1, t);
+        const vHead = Utils.clamp((v - 0.26) / 0.74, 0.0, 1.0);
+        const submentalBlend = Utils.smoothstep(0.20, 0.28, v);
+        const neckX = sinAz * 3.55;
+        const neckY = Utils.lerp(-5.8, -5.4, Utils.clamp((v - 0.20) / 0.08, 0, 1));
+        const neckZ = -1.35 + cosAz * 3.75;
+        let domeFactor = 1.0;
+        let headY = 0;
+        if (vHead <= 0.74) {
+            const tFace = vHead / 0.74;
+            headY = Utils.lerp(-6.35, 6.4, tFace);
+            domeFactor = 1.0;
+        }
+        else {
+            const tDome = (vHead - 0.74) / 0.26;
+            const phi = tDome * Trigo.halfpi;
+            headY = 6.4 + Trigo.sinePrecise(phi) * 4.1;
+            domeFactor = Math.pow(Math.max(0, Trigo.cosinePrecise(phi)), 0.82);
+        }
+        const jawTaper = Utils.smoothstep(-6.4, -1.5, headY);
+        const templeIndent = Math.exp(-Math.pow((headY - 2.8) / 2.2, 2)) * 0.28;
+        const parietalFullness = Math.exp(-Math.pow((headY - 5.2) / 3.0, 2)) * 0.35;
+        let rx = (Utils.lerp(4.2, 6.15, jawTaper) - templeIndent + parietalFullness) * domeFactor;
+        const occiputBulge = Math.exp(-Math.pow((headY - 2.6) / 4.2, 2)) * 1.15;
+        const rzFront = Utils.lerp(6.5, 6.85, Utils.smoothstep(-6.4, 2.5, headY)) * domeFactor;
+        const rzBack = (Utils.lerp(5.2, 6.95, Utils.smoothstep(-5.5, 2.0, headY)) + occiputBulge) * domeFactor;
+        const zCenter = Utils.lerp(0.45, -0.55, Utils.smoothstep(-5.5, 4.5, headY)) * domeFactor;
+        const rz = cosAz >= 0 ? rzFront : rzBack;
+        let frontXScale = 1.0;
+        if (cosAz > 0 && headY < 0.5) {
+            const lowerT = Utils.clamp((0.5 - headY) / 6.85, 0, 1);
+            frontXScale = 1.0 - lowerT * 0.38 * Math.pow(cosAz, 1.4);
+        }
+        const facialPlaneFlatten = cosAz > 0.25
+            ? 1.0 - 0.08 * Math.sin((cosAz - 0.25) / 0.75 * Trigo.pi) * Utils.smoothstep(7.0, 3.5, headY)
+            : 1.0;
+        const headX = sinAz * rx * frontXScale;
+        const headZ = zCenter + cosAz * rz * facialPlaneFlatten;
+        x = Utils.lerp(neckX, headX, submentalBlend);
+        y = Utils.lerp(neckY, headY, submentalBlend);
+        z = Utils.lerp(neckZ, headZ, submentalBlend);
     }
-    target.setScalar(sinAz * rx, y, zCenter + cosAz * rz);
-    const frontMask = Utils.smoothstep(-0.2, 0.25, cosAz);
+    target.setScalar(x, y, z);
+    const headMask = Utils.smoothstep(0.21, 0.29, v) * Utils.smoothstep(0.98, 0.88, v);
+    const frontMask = Utils.smoothstep(-0.15, 0.25, cosAz) * headMask;
     if (frontMask > 0) {
-        const jawAngleLobe = symmetricLobe(target, new Vec3(5.6, -4.8, 1.2), new Vec3(2.8, 2.8, 3.2));
-        target.x += Math.sign(target.x) * jawAngleLobe * 0.85 * frontMask;
-        target.y -= jawAngleLobe * 0.45 * frontMask;
-        const chinTaper = Utils.smoothstep(-1.5, -7.2, y) * Utils.smoothstep(-10, -7, y);
-        target.x *= 1.0 - chinTaper * 0.22 * Math.max(0, cosAz);
-        const chinLobe = gaussianLobe(target, new Vec3(0, -7, 6.2), new Vec3(2.4, 1.7, 3.0));
-        const chinCleft = gaussianLobe(target, new Vec3(0, -7.2, 6.8), new Vec3(0.45, 1.2, 2.0));
-        const subLabial = gaussianLobe(target, new Vec3(0, -5.3, 6.5), new Vec3(2.2, 0.75, 2.5));
-        target.z += (chinLobe * 1.45 - chinCleft * 0.28 - subLabial * 0.55) * frontMask;
-        target.y -= chinLobe * 0.35 * frontMask;
-        const cheekLobe = symmetricLobe(target, new Vec3(4.6, 0.2, 4.8), new Vec3(2.6, 2.4, 3.4));
-        const buccalHollow = symmetricLobe(target, new Vec3(4.8, -3.2, 3.8), new Vec3(2.1, 2.2, 2.8));
-        target.x += Math.sign(target.x) * (cheekLobe * 0.9 - buccalHollow * 0.42) * frontMask;
-        target.z += (cheekLobe * 0.95 - buccalHollow * 0.45) * frontMask;
-        const browRidge = symmetricLobe(target, new Vec3(2.8, 4.1, 6.8), new Vec3(2.8, 1.05, 2.8));
-        const glabella = gaussianLobe(target, new Vec3(0, 4.0, 7.2), new Vec3(1.3, 1.1, 2.6));
-        target.z += (browRidge * 1.35 + glabella * 0.95) * frontMask;
-        target.y -= browRidge * 0.22 * frontMask;
-        const eyeSocket = symmetricLobe(target, new Vec3(2.85, 2.35, 6.8), new Vec3(1.95, 1.45, 3.2));
-        const upperLidRim = symmetricLobe(target, new Vec3(2.85, 3.05, 6.8), new Vec3(1.75, 0.42, 2.5));
-        const lowerLidRim = symmetricLobe(target, new Vec3(2.85, 1.62, 6.8), new Vec3(1.70, 0.38, 2.5));
-        const palpebralFissure = symmetricLobe(target, new Vec3(2.85, 2.35, 6.8), new Vec3(1.48, 0.48, 2.8));
-        target.z -= eyeSocket * 1.75 * frontMask;
-        target.z += (upperLidRim * 0.72 + lowerLidRim * 0.52) * frontMask;
-        if (palpebralFissure > 0.15) {
-            const dyEye = target.y - 2.35;
-            target.y += (dyEye >= 0 ? 1 : -1) * palpebralFissure * 0.48 * frontMask;
-            target.z -= palpebralFissure * 0.85 * frontMask;
+        const gonion = symmetricLobe(target, new Vec3(4.75, -3.95, 1.35), new Vec3(1.85, 1.85, 2.5));
+        const jawRidge = symmetricLobe(target, new Vec3(3.35, -5.15, 4.15), new Vec3(2.2, 1.25, 2.6));
+        target.x += signU * (gonion * 0.65 + jawRidge * 0.28) * frontMask;
+        target.y -= (gonion * 0.45 + jawRidge * 0.32) * frontMask;
+        target.z += jawRidge * 0.35 * frontMask;
+        const chinPad = gaussianLobe(target, new Vec3(0, -5.65, 6.2), new Vec3(1.85, 1.25, 2.8));
+        const chinCleft = gaussianLobe(target, new Vec3(0, -5.75, 6.8), new Vec3(0.32, 0.95, 2.0));
+        const labiomentalCrease = gaussianLobe(target, new Vec3(0, -4.35, 6.4), new Vec3(1.95, 0.62, 2.5));
+        target.z += (chinPad * 1.15 - chinCleft * 0.18 - labiomentalCrease * 0.62) * frontMask;
+        target.y -= chinPad * 0.28 * frontMask;
+        const malarProminence = symmetricLobe(target, new Vec3(4.15, 0.55, 5.2), new Vec3(2.15, 1.65, 2.8));
+        const zygomaticArch = symmetricLobe(target, new Vec3(5.35, 0.75, 2.4), new Vec3(1.45, 1.15, 2.6));
+        const buccalHollow = symmetricLobe(target, new Vec3(3.95, -2.35, 4.2), new Vec3(1.75, 1.75, 2.5));
+        const nasolabial = symmetricLobe(target, new Vec3(1.85, -1.85, 6.4), new Vec3(0.55, 1.35, 2.2));
+        target.x += signU * (malarProminence * 0.55 + zygomaticArch * 0.48 - buccalHollow * 0.38) * frontMask;
+        target.z += (malarProminence * 0.78 - buccalHollow * 0.45 - nasolabial * 0.25) * frontMask;
+        target.y += malarProminence * 0.15 * frontMask;
+        const foreheadBoss = symmetricLobe(target, new Vec3(2.15, 5.45, 6.2), new Vec3(2.6, 1.95, 2.8));
+        const temporalHollow = symmetricLobe(target, new Vec3(5.25, 3.35, 3.2), new Vec3(1.45, 1.95, 2.4));
+        const browArch = symmetricLobe(target, new Vec3(2.35, 3.15, 6.5), new Vec3(2.15, 0.78, 2.8));
+        const glabella = gaussianLobe(target, new Vec3(0, 3.05, 6.6), new Vec3(1.15, 0.85, 2.6));
+        const nasionIndent = gaussianLobe(target, new Vec3(0, 2.25, 6.6), new Vec3(0.95, 0.52, 2.5));
+        target.x -= signU * temporalHollow * 0.42 * frontMask;
+        target.z += (foreheadBoss * 0.42 + browArch * 0.92 + glabella * 0.65 - nasionIndent * 0.48) * frontMask;
+        target.y -= browArch * 0.14 * frontMask;
+        const eyeSocketRecess = symmetricLobe(target, new Vec3(2.35, 1.95, 5.8), new Vec3(1.68, 1.22, 3.0));
+        target.z -= eyeSocketRecess * 0.48 * frontMask;
+        const dxEye = (Math.abs(target.x) - 2.35) / 1.22;
+        const dyEye = (target.y - 1.85) / 0.64;
+        const rEyeSq = dxEye * dxEye + dyEye * dyEye;
+        if (rEyeSq < 3.2) {
+            const almondProfile = Math.max(0, 1.0 - dxEye * dxEye);
+            const upperLidFold = Math.exp(-Math.pow((target.y - (1.85 + 0.42 * almondProfile)) / 0.28, 2)) * Math.exp(-dxEye * dxEye * 1.15);
+            const lowerLidFold = Math.exp(-Math.pow((target.y - (1.85 - 0.38 * almondProfile)) / 0.26, 2)) * Math.exp(-dxEye * dxEye * 1.25);
+            const lidCrease = Math.exp(-Math.pow((target.y - (1.85 + 0.76 * almondProfile)) / 0.16, 2)) * Math.exp(-dxEye * dxEye * 1.1);
+            target.z += (upperLidFold * 1.05 + lowerLidFold * 0.88 - lidCrease * 0.32) * frontMask;
+            const fissureWeight = Math.exp(-dxEye * dxEye * 1.65) * Math.exp(-dyEye * dyEye * 2.1);
+            if (fissureWeight > 0.02) {
+                const smoothSignY = Math.tanh(dyEye * 4.5);
+                target.y += smoothSignY * 0.30 * almondProfile * fissureWeight * frontMask;
+                const innerSlit = Math.exp(-dyEye * dyEye * 4.8) * Math.exp(-dxEye * dxEye * 1.85);
+                target.z -= innerSlit * 1.48 * frontMask;
+            }
         }
-        const noseBridge = gaussianLobe(target, new Vec3(0, 2.2, 7.2), new Vec3(0.95, 1.8, 3.0));
-        const noseTip = gaussianLobe(target, new Vec3(0, 0.05, 7.6), new Vec3(1.15, 1.15, 3.2));
-        const noseWings = symmetricLobe(target, new Vec3(1.15, -0.35, 7.0), new Vec3(0.85, 0.78, 2.5));
-        const philtrum = gaussianLobe(target, new Vec3(0, -1.55, 7.2), new Vec3(0.55, 0.85, 2.4));
-        target.z += (noseBridge * 1.85 + noseTip * 2.65 + noseWings * 1.25 - philtrum * 0.35) * frontMask;
-        target.y -= noseTip * 0.25 * frontMask;
-        target.x += Math.sign(target.x) * noseWings * 0.38 * frontMask;
-        const muzzleMound = gaussianLobe(target, new Vec3(0, -3.2, 6.8), new Vec3(3.1, 1.85, 3.0));
-        const upperLip = gaussianLobe(target, new Vec3(0, -2.55, 7.4), new Vec3(2.25, 0.58, 2.6));
-        const cupidsBow = gaussianLobe(target, new Vec3(0, -2.25, 7.6), new Vec3(0.45, 0.45, 2.0));
-        const lowerLip = gaussianLobe(target, new Vec3(0, -3.85, 7.3), new Vec3(2.05, 0.65, 2.6));
-        const mouthSlit = gaussianLobe(target, new Vec3(0, -3.2, 7.4), new Vec3(2.15, 0.36, 2.8));
-        const mouthCorners = symmetricLobe(target, new Vec3(2.35, -3.25, 6.4), new Vec3(0.68, 0.62, 2.2));
-        target.z += (muzzleMound * 0.65 + upperLip * 0.92 + lowerLip * 0.88 - cupidsBow * 0.22 - mouthCorners * 0.55) * frontMask;
-        if (mouthSlit > 0.1) {
-            const dyMouth = target.y - (-3.2);
-            target.y += (dyMouth >= 0 ? 1 : -1) * mouthSlit * 0.18 * frontMask;
-            target.z -= mouthSlit * 0.95 * frontMask;
+        const noseBridge = gaussianLobe(target, new Vec3(0, 1.35, 6.6), new Vec3(0.68, 1.15, 2.8));
+        const noseDorsum = gaussianLobe(target, new Vec3(0, 0.25, 6.8), new Vec3(0.75, 0.95, 2.8));
+        const noseTip = gaussianLobe(target, new Vec3(0, -0.68, 7.0), new Vec3(0.88, 0.78, 3.0));
+        const columella = gaussianLobe(target, new Vec3(0, -1.28, 6.8), new Vec3(0.42, 0.48, 2.5));
+        const nostrilWings = symmetricLobe(target, new Vec3(1.08, -0.95, 6.6), new Vec3(0.65, 0.58, 2.4));
+        const alarGroove = symmetricLobe(target, new Vec3(1.52, -0.78, 6.3), new Vec3(0.42, 0.65, 2.2));
+        const nostrilCavities = symmetricLobe(target, new Vec3(0.68, -1.22, 6.8), new Vec3(0.35, 0.28, 2.0));
+        target.z += (noseBridge * 1.35 +
+            noseDorsum * 1.85 +
+            noseTip * 2.25 +
+            columella * 1.15 +
+            nostrilWings * 1.05 -
+            alarGroove * 0.42 -
+            nostrilCavities * 0.45) * frontMask;
+        target.y -= (noseTip * 0.18 - nostrilCavities * 0.16) * frontMask;
+        target.x += signU * (nostrilWings * 0.28 - noseBridge * 0.16 * Math.min(1, Math.abs(target.x))) * frontMask;
+        const philtrumDimple = gaussianLobe(target, new Vec3(0, -1.85, 6.8), new Vec3(0.38, 0.55, 2.2));
+        const philtrumColumns = symmetricLobe(target, new Vec3(0.42, -1.95, 6.8), new Vec3(0.28, 0.52, 2.2));
+        const muzzleBarrel = gaussianLobe(target, new Vec3(0, -2.95, 6.4), new Vec3(2.45, 1.45, 2.8));
+        const upperLip = gaussianLobe(target, new Vec3(0, -2.62, 6.9), new Vec3(1.75, 0.46, 2.5));
+        const cupidsBowDip = gaussianLobe(target, new Vec3(0, -2.38, 7.2), new Vec3(0.32, 0.28, 2.0));
+        const lowerLip = gaussianLobe(target, new Vec3(0, -3.58, 6.8), new Vec3(1.58, 0.52, 2.5));
+        const mouthCorners = symmetricLobe(target, new Vec3(1.98, -3.12, 6.2), new Vec3(0.55, 0.52, 2.2));
+        target.z += (muzzleBarrel * 0.58 +
+            philtrumColumns * 0.22 -
+            philtrumDimple * 0.28 +
+            upperLip * 0.95 -
+            cupidsBowDip * 0.22 +
+            lowerLip * 0.92 -
+            mouthCorners * 0.52) * frontMask;
+        const dxMouth = target.x / 1.82;
+        const dyMouth = (target.y - (-3.1)) / 0.36;
+        const mouthCrease = Math.exp(-dxMouth * dxMouth * 1.45) * Math.exp(-dyMouth * dyMouth * 2.4);
+        if (mouthCrease > 0.02) {
+            const lipRollY = Math.tanh(dyMouth * 3.5);
+            target.y += lipRollY * 0.12 * mouthCrease * frontMask;
+            target.z -= Math.exp(-dyMouth * dyMouth * 4.2) * 0.68 * mouthCrease * frontMask;
         }
     }
-    const earLobe = symmetricLobe(target, new Vec3(7.4, 1.2, -0.8), new Vec3(1.2, 2.2, 1.45));
-    if (earLobe > 0.05) {
-        target.x += Math.sign(target.x) * earLobe * 1.15;
-        target.z -= earLobe * 0.35;
+    if (headMask > 0.1) {
+        const earOuter = symmetricLobe(target, new Vec3(6.05, 0.45, -0.65), new Vec3(1.15, 1.85, 1.25));
+        const earHelixRim = symmetricLobe(target, new Vec3(6.25, 0.65, -0.95), new Vec3(0.85, 1.65, 0.85));
+        const earConcha = symmetricLobe(target, new Vec3(6.15, 0.35, -0.45), new Vec3(0.65, 0.92, 0.68));
+        if (earOuter > 0.02) {
+            target.x += signU * (earOuter * 0.95 + earHelixRim * 0.45 - earConcha * 0.42) * headMask;
+            target.z -= (earOuter * 0.28 + earHelixRim * 0.22) * headMask;
+        }
+        const foreheadHairlineY = 6.35 - 0.35 * Math.cos(absU * 14.0) * Utils.smoothstep(0.28, 0.0, absU);
+        const frontHairMask = Utils.smoothstep(foreheadHairlineY - 0.35, foreheadHairlineY + 0.35, target.y);
+        const sideburnMask = Utils.smoothstep(0.32, 0.38, absU) * Utils.smoothstep(0.47, 0.42, absU) *
+            Utils.smoothstep(0.1, 0.8, target.y) * Utils.smoothstep(6.8, 5.5, target.y);
+        const backScalpMask = Utils.smoothstep(0.36, 0.48, absU) * Utils.smoothstep(-3.6, -2.6, target.y);
+        const hairVolume = Math.max(frontHairMask, sideburnMask * 0.75, backScalpMask) * Utils.smoothstep(10.4, 9.6, target.y);
+        if (hairVolume > 0.01) {
+            const crownFlat = Utils.smoothstep(7.2, 9.5, target.y) * (1.0 - absU * 0.5);
+            target.x += sinAz * (0.20 * hairVolume + 0.18 * crownFlat);
+            target.y += 0.22 * hairVolume;
+            target.z += cosAz * 0.22 * hairVolume;
+        }
     }
     let jawWeight = 0;
-    if (y < -1 && v > 0.14) {
-        const verticalJaw = Utils.smoothstep(-1.2, -5.8, y) * Utils.smoothstep(-9.8, -6.5, y);
-        const forwardJaw = Utils.smoothstep(-2.5, 3.5, target.z);
-        jawWeight = Utils.clamp(verticalJaw * forwardJaw, 0, 1);
-        const mouthCenterLobe = gaussianLobe(target, new Vec3(0, -3.2, 7.0), new Vec3(2.6, 1.5, 3.2));
-        if (mouthCenterLobe > 0.1) {
-            const lowerLipFactor = Utils.smoothstep(-2.95, -3.45, y);
-            jawWeight = Utils.lerp(jawWeight, lowerLipFactor, Utils.clamp(mouthCenterLobe * 1.2, 0, 1));
+    if (v > 0.21 && target.y < -1.2) {
+        const verticalJaw = Utils.smoothstep(-1.4, -4.8, target.y) * Utils.smoothstep(-6.8, -5.2, target.y);
+        const forwardJaw = Utils.smoothstep(-1.5, 3.2, target.z);
+        jawWeight = Utils.clamp(verticalJaw * forwardJaw * headMask, 0, 1);
+        const mouthZone = gaussianLobe(target, new Vec3(0, -3.1, 6.8), new Vec3(2.3, 1.35, 3.0));
+        if (mouthZone > 0.05) {
+            const lowerLipFactor = Utils.smoothstep(-2.85, -3.35, target.y);
+            jawWeight = Utils.lerp(jawWeight, lowerLipFactor, Utils.clamp(mouthZone * 1.25, 0, 1));
         }
     }
     return jawWeight;
@@ -308,9 +385,10 @@ function appendEyeballSphere(center, radius, uvOffset, uvScale, regionName, posi
             const theta = u * Trigo.twopi;
             const sinTheta = Trigo.sinePrecise(theta);
             const cosTheta = Trigo.cosinePrecise(theta);
-            const corneaBulge = v < 0.28 ? Trigo.cosinePrecise((v / 0.28) * Trigo.halfpi) * 0.14 : 0;
+            const corneaBulge = v < 0.26 ? Trigo.cosinePrecise((v / 0.26) * Trigo.halfpi) * 0.08 : 0;
             const r = radius + corneaBulge;
-            scratchPos.setScalar(center.x + r * sinPhi * cosTheta, center.y + r * sinPhi * sinTheta, center.z + r * cosPhi);
+            const signCenter = center.x < 0 ? -1 : 1;
+            scratchPos.setScalar(center.x + signCenter * r * sinPhi * cosTheta, center.y + r * sinPhi * sinTheta, center.z + r * cosPhi);
             positions.push(scratchPos.x, scratchPos.y, scratchPos.z);
             const radial = Math.min(1, v * 1.65);
             scratchUv.setScalar(uvOffset.x + (0.5 + 0.48 * radial * cosTheta) * uvScale.x, uvOffset.y + (0.5 + 0.48 * radial * sinTheta) * uvScale.y);
@@ -341,13 +419,13 @@ function appendDentalArch(yBase, yHeight, jawWeight, uvBoxMin, uvBoxMax, regionN
     const segU = 14;
     const startVertex = positions.length / 3;
     const startIndex = indices.length;
-    const archWidth = 2.05;
-    const archDepth = 1.65;
-    const zFront = 6.15;
+    const archWidth = 1.72;
+    const archDepth = 1.35;
+    const zFront = 5.45;
     for (let row = 0; row <= 2; row++) {
         const v = row / 2;
         const y = yBase + (row === 1 ? yHeight : 0);
-        const zInset = row === 2 ? -0.32 : 0;
+        const zInset = row === 2 ? -0.28 : 0;
         for (let iu = 0; iu <= segU; iu++) {
             const u = iu / segU;
             const angle = (u - 0.5) * Trigo.pi * 0.82;
@@ -385,10 +463,10 @@ function appendDentalArch(yBase, yHeight, jawWeight, uvBoxMin, uvBoxMax, regionN
 function appendMouthInnerAndBrows(positions, uvs, indices, vertexRegionMap, jawWeights, submeshes) {
     const startVertexMouth = positions.length / 3;
     const startIndexMouth = indices.length;
-    const mw = 2.2;
-    const myTop = -2.1;
-    const myBot = -4.4;
-    const mz = 5.1;
+    const mw = 1.85;
+    const myTop = -2.25;
+    const myBot = -4.05;
+    const mz = 4.55;
     const mouthPts = [
         new Vec3(-mw, myTop, mz),
         new Vec3(mw, myTop, mz),
@@ -398,7 +476,7 @@ function appendMouthInnerAndBrows(positions, uvs, indices, vertexRegionMap, jawW
     const mouthJaws = [0.0, 0.0, 0.85, 0.85];
     for (let i = 0; i < 4; i++) {
         positions.push(mouthPts[i].x, mouthPts[i].y, mouthPts[i].z);
-        uvs.push(0.88 + (i & 1) * 0.08, 0.88 + (i >> 1) * 0.08);
+        uvs.push(0.55 + (i & 1) * 0.20, 0.95 + (i >> 1) * 0.04);
         vertexRegionMap.push(REGION_ID.mouthInner);
         jawWeights.push(mouthJaws[i]);
     }
@@ -412,34 +490,41 @@ function appendMouthInnerAndBrows(positions, uvs, indices, vertexRegionMap, jawW
     });
     const startVertexBrows = positions.length / 3;
     const startIndexBrows = indices.length;
-    const segBrow = 10;
+    const segBrow = 12;
+    const rowsBrow = 2;
     for (const side of [-1, 1]) {
         const baseV = positions.length / 3;
-        for (let row = 0; row <= 1; row++) {
-            const yOff = row === 0 ? -0.26 : 0.28;
+        for (let row = 0; row <= rowsBrow; row++) {
+            const rowNorm = row / rowsBrow;
+            const rowOffsetV = (rowNorm - 0.5) * 0.022;
+            const crestLift = row === 1 ? 0.14 : 0.02;
             for (let i = 0; i <= segBrow; i++) {
                 const t = i / segBrow;
-                const x = side * Utils.lerp(0.95, 4.45, t);
-                const arch = Trigo.sinePrecise(t * Trigo.pi) * 0.42;
-                const y = 3.95 + arch + yOff * (1 - t * 0.35);
-                const z = 8.15 - t * t * 1.28;
-                positions.push(x, y, z);
-                uvs.push(0.1 + t * 0.3, 0.90 + row * 0.06);
+                const uBrow = side * Utils.lerp(0.038, 0.198, t);
+                const archV = Math.sin(Math.pow(t, 0.85) * Trigo.pi) * 0.016 - (1.0 - t) * 0.005;
+                const vBrow = 0.678 + archV + rowOffsetV * (1.0 - t * 0.38);
+                shapeAnatomicalHeadPoint(uBrow, vBrow, scratchPos);
+                const endTaper = Math.sin(t * Trigo.pi);
+                const lift = crestLift * (0.35 + 0.65 * endTaper);
+                positions.push(scratchPos.x + side * lift * 0.25, scratchPos.y, scratchPos.z + lift);
+                uvs.push(0.85 + t * 0.13, 0.78 + rowNorm * 0.18);
                 vertexRegionMap.push(REGION_ID.browsHair);
                 jawWeights.push(0);
             }
         }
         const stride = segBrow + 1;
-        for (let i = 0; i < segBrow; i++) {
-            const a = baseV + i;
-            const b = a + 1;
-            const c = a + stride;
-            const d = c + 1;
-            if (side > 0) {
-                indices.push(a, b, c, b, d, c);
-            }
-            else {
-                indices.push(a, c, b, b, c, d);
+        for (let row = 0; row < rowsBrow; row++) {
+            for (let i = 0; i < segBrow; i++) {
+                const a = baseV + row * stride + i;
+                const b = a + 1;
+                const c = a + stride;
+                const d = c + 1;
+                if (side > 0) {
+                    indices.push(a, b, c, b, d, c);
+                }
+                else {
+                    indices.push(a, c, b, b, c, d);
+                }
             }
         }
     }
@@ -451,7 +536,7 @@ function appendMouthInnerAndBrows(positions, uvs, indices, vertexRegionMap, jawW
         vertexCount: positions.length / 3 - startVertexBrows,
     });
 }
-function buildAnatomicalBaseHead(segU = 56, segV = 44) {
+function buildAnatomicalBaseHead(segU = 64, segV = 48) {
     const positions = [];
     const uvs = [];
     const indices = [];
@@ -462,13 +547,14 @@ function buildAnatomicalBaseHead(segU = 56, segV = 44) {
     const startSkinIndex = 0;
     for (let iv = 0; iv <= segV; iv++) {
         const v = iv / segV;
-        const vRemapped = Utils.lerp(v, Utils.smoothstep(0, 1, v), 0.25);
+        const vRemapped = Utils.lerp(v, Utils.smoothstep(0, 1, v), 0.22);
         for (let iu = 0; iu <= segU; iu++) {
-            const uNorm = iu / segU;
-            const u = (uNorm - 0.5) * 2.0;
+            const u = (2 * iu - segU) / segU;
             const jawW = shapeAnatomicalHeadPoint(u, vRemapped, scratchPos);
             positions.push(scratchPos.x, scratchPos.y, scratchPos.z);
-            scratchUv.setScalar(Utils.clamp(0.5 + u * 0.48, 0.01, 0.99), Utils.clamp(0.74 - vRemapped * 0.72, 0.02, 0.74));
+            const yHeightNorm = Utils.clamp((scratchPos.y + 11.0) / 21.5, 0.0, 1.0);
+            const sv = Utils.lerp(vRemapped * 0.85, yHeightNorm, Utils.smoothstep(0.18, 0.28, vRemapped));
+            scratchUv.setScalar(Utils.clamp(0.5 + u * 0.48, 0.01, 0.99), Utils.clamp(0.74 - sv * 0.72, 0.02, 0.74));
             uvs.push(scratchUv.x, scratchUv.y);
             vertexRegionMap.push(REGION_ID.skin);
             jawWeights.push(jawW);
@@ -492,15 +578,15 @@ function buildAnatomicalBaseHead(segU = 56, segV = 44) {
         vertexCount: positions.length / 3,
     });
     const pivots = {
-        neck: new Vec3(0, -8.5, -1.2),
-        jaw: new Vec3(0, -1.8, 1.6),
-        eyeLeft: new Vec3(-2.85, 2.35, 5.55),
-        eyeRight: new Vec3(2.85, 2.35, 5.55),
+        neck: new Vec3(0, -8.2, -1.5),
+        jaw: new Vec3(0, -1.6, 1.4),
+        eyeLeft: new Vec3(-2.35, 1.85, 4.65),
+        eyeRight: new Vec3(2.35, 1.85, 4.65),
     };
-    appendEyeballSphere(pivots.eyeLeft, 1.38, new Vec2(0.02, 0.76), new Vec2(0.22, 0.22), 'eyeLeft', positions, uvs, indices, vertexRegionMap, jawWeights, submeshes);
-    appendEyeballSphere(pivots.eyeRight, 1.38, new Vec2(0.26, 0.76), new Vec2(0.22, 0.22), 'eyeRight', positions, uvs, indices, vertexRegionMap, jawWeights, submeshes);
-    appendDentalArch(-2.35, -0.68, 0.0, new Vec2(0.52, 0.78), new Vec2(0.82, 0.85), 'teethUpper', positions, uvs, indices, vertexRegionMap, jawWeights, submeshes);
-    appendDentalArch(-3.95, 0.68, 1.0, new Vec2(0.52, 0.86), new Vec2(0.82, 0.93), 'teethLower', positions, uvs, indices, vertexRegionMap, jawWeights, submeshes);
+    appendEyeballSphere(pivots.eyeLeft, 1.14, new Vec2(0.02, 0.76), new Vec2(0.22, 0.22), 'eyeLeft', positions, uvs, indices, vertexRegionMap, jawWeights, submeshes);
+    appendEyeballSphere(pivots.eyeRight, 1.14, new Vec2(0.26, 0.76), new Vec2(0.22, 0.22), 'eyeRight', positions, uvs, indices, vertexRegionMap, jawWeights, submeshes);
+    appendDentalArch(-2.55, -0.55, 0.0, new Vec2(0.52, 0.78), new Vec2(0.82, 0.85), 'teethUpper', positions, uvs, indices, vertexRegionMap, jawWeights, submeshes);
+    appendDentalArch(-3.65, 0.55, 1.0, new Vec2(0.52, 0.86), new Vec2(0.82, 0.93), 'teethLower', positions, uvs, indices, vertexRegionMap, jawWeights, submeshes);
     appendMouthInnerAndBrows(positions, uvs, indices, vertexRegionMap, jawWeights, submeshes);
     const posArray = new Float32Array(positions);
     const uvArray = new Float32Array(uvs);
@@ -571,22 +657,22 @@ function applyMacroProportions(baseHead, proportions, sculptOffsets, outPosition
     outPivots.eyeLeft.setScalar(basePivots.eyeLeft.x - proportions.eyeSocketOffset.x, basePivots.eyeLeft.y + proportions.eyeSocketOffset.y, basePivots.eyeLeft.z + proportions.eyeSocketOffset.z);
     outPivots.eyeRight.setScalar(basePivots.eyeRight.x + proportions.eyeSocketOffset.x, basePivots.eyeRight.y + proportions.eyeSocketOffset.y, basePivots.eyeRight.z + proportions.eyeSocketOffset.z);
     const p = new Vec3();
-    const cJaw = new Vec3(5.2, -4.6, 1.5);
-    const rJaw = new Vec3(4.5, 4.2, 5.0);
-    const cChin = new Vec3(0, -7, 6.0);
-    const rChin = new Vec3(3.2, 2.5, 3.8);
-    const cCheek = new Vec3(4.6, 0.2, 4.8);
-    const rCheek = new Vec3(3.2, 3.0, 4.0);
-    const cBrow = new Vec3(2.8, 4.1, 6.8);
-    const rBrow = new Vec3(3.6, 1.8, 3.5);
-    const cEye = new Vec3(2.85, 2.35, 6.2);
-    const rEye = new Vec3(2.5, 2.0, 3.5);
-    const cNose = new Vec3(0, 0.8, 7.2);
-    const rNose = new Vec3(2.2, 2.8, 3.6);
-    const cMouth = new Vec3(0, -3.2, 6.8);
-    const rMouth = new Vec3(3.8, 2.2, 3.6);
-    const cEar = new Vec3(7.6, 0.6, -1.2);
-    const rEar = new Vec3(2.0, 3.0, 2.5);
+    const cJaw = new Vec3(4.6, -4.1, 1.5);
+    const rJaw = new Vec3(4.2, 3.6, 4.8);
+    const cChin = new Vec3(0, -5.65, 6.2);
+    const rChin = new Vec3(2.8, 2.1, 3.5);
+    const cCheek = new Vec3(4.15, 0.55, 5.0);
+    const rCheek = new Vec3(2.8, 2.5, 3.6);
+    const cBrow = new Vec3(2.35, 3.15, 6.5);
+    const rBrow = new Vec3(3.2, 1.5, 3.2);
+    const cEye = new Vec3(2.35, 1.85, 5.6);
+    const rEye = new Vec3(2.1, 1.6, 3.2);
+    const cNose = new Vec3(0, 0.15, 7.0);
+    const rNose = new Vec3(1.9, 2.4, 3.4);
+    const cMouth = new Vec3(0, -3.1, 6.6);
+    const rMouth = new Vec3(3.2, 1.9, 3.2);
+    const cEar = new Vec3(6.15, 0.45, -0.65);
+    const rEar = new Vec3(1.8, 2.6, 2.2);
     for (let i = 0; i < vertexCount; i++) {
         const idx = i * 3;
         p.setScalar(srcPos[idx], srcPos[idx + 1], srcPos[idx + 2]);
@@ -611,23 +697,23 @@ function applyMacroProportions(baseHead, proportions, sculptOffsets, outPosition
             region === FACE_REGION_IDS.teethLower ||
             region === FACE_REGION_IDS.mouthInner) {
             p.x *= Utils.lerp(1.0, proportions.mouthScale.x, 0.65);
-            p.y += (proportions.jawScale.y - 1.0) * -2.2;
-            p.z += (proportions.mouthScale.z - 1.0) * 1.4;
+            p.y += (proportions.jawScale.y - 1.0) * -1.8;
+            p.z += (proportions.mouthScale.z - 1.0) * 1.2;
         }
         else {
-            const upperMask = Utils.smoothstep(-1, 3.5, p.y);
-            const lowerMask = Utils.smoothstep(1.5, -3.5, p.y) * Utils.smoothstep(-10, -7.8, p.y);
+            const upperMask = Utils.smoothstep(-0.8, 3.0, p.y);
+            const lowerMask = Utils.smoothstep(1.2, -3.2, p.y) * Utils.smoothstep(-6.8, -5.4, p.y);
             p.x *= Utils.lerp(1.0, proportions.craniumScale.x, upperMask);
             if (p.y > 0) {
                 p.y *= Utils.lerp(1.0, proportions.craniumScale.y, upperMask);
             }
             p.z *= Utils.lerp(1.0, proportions.craniumScale.z, upperMask);
-            const wJaw = Math.max(lowerMask * 0.7, symmetricFalloff(p, cJaw, rJaw));
+            const wJaw = Math.max(lowerMask * 0.65, symmetricFalloff(p, cJaw, rJaw));
             p.x *= Utils.lerp(1.0, proportions.jawScale.x, wJaw);
-            if (p.y < 0) {
-                p.y *= Utils.lerp(1.0, proportions.jawScale.y, wJaw);
+            if (p.y < 0 && p.y > -6.8) {
+                p.y *= Utils.lerp(1.0, proportions.jawScale.y, wJaw * 0.65);
             }
-            p.z *= Utils.lerp(1.0, proportions.jawScale.z, wJaw * 0.6);
+            p.z *= Utils.lerp(1.0, proportions.jawScale.z, wJaw * 0.55);
             const wChin = regionFalloff(p, cChin, rChin);
             if (wChin > 0) {
                 p.x *= 1.0 + proportions.chinOffset.x * 0.12 * wChin;
@@ -655,20 +741,20 @@ function applyMacroProportions(baseHead, proportions, sculptOffsets, outPosition
             const wNose = regionFalloff(p, cNose, rNose);
             if (wNose > 0) {
                 p.x *= Utils.lerp(1.0, proportions.noseScale.x, wNose);
-                p.y += (proportions.noseScale.y - 1.0) * -1.4 * wNose;
-                p.z += (proportions.noseScale.z - 1.0) * 2.4 * wNose;
+                p.y += (proportions.noseScale.y - 1.0) * -1.1 * wNose;
+                p.z += (proportions.noseScale.z - 1.0) * 1.9 * wNose;
             }
             const wMouth = regionFalloff(p, cMouth, rMouth);
             if (wMouth > 0) {
                 p.x *= Utils.lerp(1.0, proportions.mouthScale.x, wMouth);
-                p.y += (p.y + 3.2) * (proportions.mouthScale.y - 1.0) * wMouth;
-                p.z += (proportions.mouthScale.z - 1.0) * 1.8 * wMouth;
+                p.y += (p.y + 3.1) * (proportions.mouthScale.y - 1.0) * wMouth;
+                p.z += (proportions.mouthScale.z - 1.0) * 1.5 * wMouth;
             }
             const wEar = symmetricFalloff(p, cEar, rEar);
             if (wEar > 0) {
-                p.x += signX * (proportions.earScale.x - 1.0) * 1.4 * wEar;
-                p.y += (p.y - 0.6) * (proportions.earScale.y - 1.0) * wEar;
-                p.z += (proportions.earScale.z - 1.0) * 1.1 * wEar;
+                p.x += signX * (proportions.earScale.x - 1.0) * 1.2 * wEar;
+                p.y += (p.y - 0.45) * (proportions.earScale.y - 1.0) * wEar;
+                p.z += (proportions.earScale.z - 1.0) * 0.9 * wEar;
             }
         }
         if (sculptOffsets && sculptOffsets.length >= idx + 3) {
@@ -689,21 +775,21 @@ function evaluateSingleMuscleDisplacement(muscleName, pos, region, pivots, outDe
         return;
     }
     if (region === FACE_REGION_IDS.teethLower || region === FACE_REGION_IDS.mouthInner) {
-        if (region === FACE_REGION_IDS.mouthInner && pos.y > -3.15) {
+        if (region === FACE_REGION_IDS.mouthInner && pos.y > -3.05) {
             return;
         }
         switch (muscleName) {
             case 'jawOpen':
-                outDelta.setScalar(0, -2.15, -0.55);
+                outDelta.setScalar(0, -1.95, -0.45);
                 return;
             case 'jawForward':
-                outDelta.setScalar(0, 0, 1.15);
+                outDelta.setScalar(0, 0, 0.95);
                 return;
             case 'jawLeft':
-                outDelta.setScalar(-1.1, 0, 0);
+                outDelta.setScalar(-0.95, 0, 0);
                 return;
             case 'jawRight':
-                outDelta.setScalar(1.1, 0, 0);
+                outDelta.setScalar(0.95, 0, 0);
                 return;
             default:
                 return;
@@ -713,11 +799,11 @@ function evaluateSingleMuscleDisplacement(muscleName, pos, region, pivots, outDe
     const eyeR = pivots.eyeRight;
     switch (muscleName) {
         case 'browInnerUp': {
-            const wL = regionFalloff(pos, new Vec3(eyeL.x * 0.45, eyeL.y + 1.85, eyeL.z + 1.2), new Vec3(1.9, 1.6, 2.8));
-            const wR = regionFalloff(pos, new Vec3(eyeR.x * 0.45, eyeR.y + 1.85, eyeR.z + 1.2), new Vec3(1.9, 1.6, 2.8));
+            const wL = regionFalloff(pos, new Vec3(eyeL.x * 0.45, eyeL.y + 1.35, eyeL.z + 1.8), new Vec3(1.65, 1.35, 2.5));
+            const wR = regionFalloff(pos, new Vec3(eyeR.x * 0.45, eyeR.y + 1.35, eyeR.z + 1.8), new Vec3(1.65, 1.35, 2.5));
             const w = Math.min(1.1, wL + wR);
             if (w > 0.002) {
-                outDelta.setScalar(0, 1.15 * w, 0.22 * w);
+                outDelta.setScalar(0, 0.95 * w, 0.18 * w);
             }
             break;
         }
@@ -728,9 +814,9 @@ function evaluateSingleMuscleDisplacement(muscleName, pos, region, pivots, outDe
             const ey = isLeft ? eyeL.y : eyeR.y;
             const ez = isLeft ? eyeL.z : eyeR.z;
             const medialSign = isLeft ? 1 : -1;
-            const w = regionFalloff(pos, new Vec3(ex * 0.85, ey + 1.75, ez + 1.2), new Vec3(2.4, 1.45, 2.8));
+            const w = regionFalloff(pos, new Vec3(ex * 0.85, ey + 1.30, ez + 1.8), new Vec3(2.1, 1.25, 2.5));
             if (w > 0.002) {
-                outDelta.setScalar(medialSign * 0.58 * w, -1.05 * w, 0.32 * w);
+                outDelta.setScalar(medialSign * 0.48 * w, -0.88 * w, 0.25 * w);
             }
             break;
         }
@@ -741,9 +827,9 @@ function evaluateSingleMuscleDisplacement(muscleName, pos, region, pivots, outDe
             const ey = isLeft ? eyeL.y : eyeR.y;
             const ez = isLeft ? eyeL.z : eyeR.z;
             const latSign = isLeft ? -1 : 1;
-            const w = regionFalloff(pos, new Vec3(ex * 1.32, ey + 1.82, ez + 0.8), new Vec3(2.1, 1.45, 2.8));
+            const w = regionFalloff(pos, new Vec3(ex * 1.32, ey + 1.35, ez + 1.4), new Vec3(1.85, 1.25, 2.5));
             if (w > 0.002) {
-                outDelta.setScalar(latSign * 0.22 * w, 1.18 * w, 0.15 * w);
+                outDelta.setScalar(latSign * 0.18 * w, 0.98 * w, 0.12 * w);
             }
             break;
         }
@@ -755,10 +841,10 @@ function evaluateSingleMuscleDisplacement(muscleName, pos, region, pivots, outDe
             const ex = isLeft ? eyeL.x : eyeR.x;
             const ey = isLeft ? eyeL.y : eyeL.y;
             const ez = isLeft ? eyeL.z : eyeR.z;
-            const wUpper = regionFalloff(pos, new Vec3(ex, ey + 0.62, ez + 1.25), new Vec3(1.75, 0.72, 2.2));
-            const wLower = regionFalloff(pos, new Vec3(ex, ey - 0.58, ez + 1.20), new Vec3(1.70, 0.62, 2.2));
+            const wUpper = regionFalloff(pos, new Vec3(ex, ey + 0.42, ez + 1.35), new Vec3(1.45, 0.55, 2.0));
+            const wLower = regionFalloff(pos, new Vec3(ex, ey - 0.42, ez + 1.30), new Vec3(1.42, 0.48, 2.0));
             if (wUpper > 0.002 || wLower > 0.002) {
-                outDelta.setScalar(0, -1.12 * wUpper + 0.38 * wLower, 0.42 * (wUpper + wLower));
+                outDelta.setScalar(0, -0.85 * wUpper + 0.28 * wLower, 0.28 * (wUpper + wLower));
             }
             break;
         }
@@ -766,12 +852,12 @@ function evaluateSingleMuscleDisplacement(muscleName, pos, region, pivots, outDe
         case 'eyeSquintR': {
             const isLeft = muscleName === 'eyeSquintL';
             const ex = isLeft ? eyeL.x : eyeR.x;
-            const ey = isLeft ? eyeL.y : eyeL.y;
+            const ey = isLeft ? eyeL.y : eyeR.y;
             const ez = isLeft ? eyeL.z : eyeR.z;
             const medialSign = isLeft ? 1 : -1;
-            const w = regionFalloff(pos, new Vec3(ex * 1.05, ey - 0.55, ez + 1.0), new Vec3(2.1, 1.05, 2.5));
+            const w = regionFalloff(pos, new Vec3(ex * 1.05, ey - 0.45, ez + 1.2), new Vec3(1.85, 0.88, 2.2));
             if (w > 0.002) {
-                outDelta.setScalar(medialSign * 0.24 * w, 0.72 * w, 0.28 * w);
+                outDelta.setScalar(medialSign * 0.20 * w, 0.58 * w, 0.22 * w);
             }
             break;
         }
@@ -783,10 +869,10 @@ function evaluateSingleMuscleDisplacement(muscleName, pos, region, pivots, outDe
             const ex = isLeft ? eyeL.x : eyeR.x;
             const ey = isLeft ? eyeL.y : eyeL.y;
             const ez = isLeft ? eyeL.z : eyeR.z;
-            const wUpper = regionFalloff(pos, new Vec3(ex, ey + 0.58, ez + 1.25), new Vec3(1.75, 0.75, 2.2));
-            const wLower = regionFalloff(pos, new Vec3(ex, ey - 0.55, ez + 1.20), new Vec3(1.70, 0.58, 2.2));
+            const wUpper = regionFalloff(pos, new Vec3(ex, ey + 0.42, ez + 1.35), new Vec3(1.45, 0.58, 2.0));
+            const wLower = regionFalloff(pos, new Vec3(ex, ey - 0.42, ez + 1.30), new Vec3(1.42, 0.48, 2.0));
             if (wUpper > 0.002 || wLower > 0.002) {
-                outDelta.setScalar(0, 0.68 * wUpper - 0.22 * wLower, -0.15 * wUpper);
+                outDelta.setScalar(0, 0.52 * wUpper - 0.18 * wLower, -0.12 * wUpper);
             }
             break;
         }
@@ -794,9 +880,9 @@ function evaluateSingleMuscleDisplacement(muscleName, pos, region, pivots, outDe
         case 'cheekSquintR': {
             const isLeft = muscleName === 'cheekSquintL';
             const signX = isLeft ? -1 : 1;
-            const w = regionFalloff(pos, new Vec3(signX * 3.6, 0.35, 5.5), new Vec3(2.5, 1.85, 3.0));
+            const w = regionFalloff(pos, new Vec3(signX * 3.25, 0.35, 5.2), new Vec3(2.2, 1.65, 2.8));
             if (w > 0.002) {
-                outDelta.setScalar(signX * 0.28 * w, 0.78 * w, 0.52 * w);
+                outDelta.setScalar(signX * 0.22 * w, 0.65 * w, 0.42 * w);
             }
             break;
         }
@@ -804,37 +890,37 @@ function evaluateSingleMuscleDisplacement(muscleName, pos, region, pivots, outDe
         case 'noseSneerR': {
             const isLeft = muscleName === 'noseSneerL';
             const signX = isLeft ? -1 : 1;
-            const wWing = regionFalloff(pos, new Vec3(signX * 1.35, -0.45, 7.0), new Vec3(1.35, 1.25, 2.4));
-            const wLip = regionFalloff(pos, new Vec3(signX * 1.45, -2.15, 7.2), new Vec3(1.45, 1.15, 2.4));
+            const wWing = regionFalloff(pos, new Vec3(signX * 1.12, -0.95, 6.6), new Vec3(1.15, 1.05, 2.2));
+            const wLip = regionFalloff(pos, new Vec3(signX * 1.18, -2.25, 6.8), new Vec3(1.25, 0.95, 2.2));
             const w = Math.max(wWing, wLip * 0.85);
             if (w > 0.002) {
-                outDelta.setScalar(signX * 0.35 * wWing, 0.92 * w, 0.28 * w);
+                outDelta.setScalar(signX * 0.28 * wWing, 0.78 * w, 0.22 * w);
             }
             break;
         }
         case 'jawOpen': {
-            const wLowerLip = regionFalloff(pos, new Vec3(0, -4.1, 6.8), new Vec3(3.2, 1.6, 3.2));
-            const wChin = regionFalloff(pos, new Vec3(0, -6.8, 5.2), new Vec3(4.5, 2.8, 4.5));
-            const wCorners = symmetricFalloff(pos, new Vec3(2.35, -3.2, 6.4), new Vec3(1.2, 1.1, 2.2));
+            const wLowerLip = regionFalloff(pos, new Vec3(0, -3.75, 6.6), new Vec3(2.8, 1.35, 3.0));
+            const wChin = regionFalloff(pos, new Vec3(0, -5.65, 5.2), new Vec3(3.8, 2.2, 4.2));
+            const wCorners = symmetricFalloff(pos, new Vec3(1.98, -3.12, 6.2), new Vec3(1.05, 0.95, 2.0));
             const w = Math.min(1.0, Math.max(wLowerLip, wChin * 0.92) + wCorners * 0.35);
             if (w > 0.002) {
-                outDelta.setScalar(-pos.x * 0.05 * w, -2.25 * w, -0.58 * w);
+                outDelta.setScalar(-pos.x * 0.04 * w, -1.95 * w, -0.48 * w);
             }
             break;
         }
         case 'jawForward': {
-            const w = regionFalloff(pos, new Vec3(0, -5.8, 5.5), new Vec3(4.8, 3.0, 4.5));
+            const w = regionFalloff(pos, new Vec3(0, -5.1, 5.2), new Vec3(4.2, 2.5, 4.2));
             if (w > 0.002) {
-                outDelta.setScalar(0, 0.12 * w, 1.15 * w);
+                outDelta.setScalar(0, 0.10 * w, 0.95 * w);
             }
             break;
         }
         case 'jawLeft':
         case 'jawRight': {
             const dir = muscleName === 'jawLeft' ? -1 : 1;
-            const w = regionFalloff(pos, new Vec3(0, -5.8, 5.5), new Vec3(4.8, 3.0, 4.5));
+            const w = regionFalloff(pos, new Vec3(0, -5.1, 5.2), new Vec3(4.2, 2.5, 4.2));
             if (w > 0.002) {
-                outDelta.setScalar(dir * 1.15 * w, 0, 0);
+                outDelta.setScalar(dir * 0.95 * w, 0, 0);
             }
             break;
         }
@@ -842,10 +928,10 @@ function evaluateSingleMuscleDisplacement(muscleName, pos, region, pivots, outDe
         case 'mouthSmileR': {
             const isLeft = muscleName === 'mouthSmileL';
             const signX = isLeft ? -1 : 1;
-            const wCorner = regionFalloff(pos, new Vec3(signX * 2.15, -3.15, 6.6), new Vec3(1.85, 1.45, 2.6));
-            const wCheek = regionFalloff(pos, new Vec3(signX * 3.6, -1.2, 5.6), new Vec3(2.2, 1.8, 2.8));
+            const wCorner = regionFalloff(pos, new Vec3(signX * 1.92, -3.08, 6.3), new Vec3(1.55, 1.25, 2.4));
+            const wCheek = regionFalloff(pos, new Vec3(signX * 3.15, -1.15, 5.3), new Vec3(1.95, 1.55, 2.6));
             if (wCorner > 0.002 || wCheek > 0.002) {
-                outDelta.setScalar(signX * (0.95 * wCorner + 0.35 * wCheek), 1.15 * wCorner + 0.55 * wCheek, -0.28 * wCorner + 0.38 * wCheek);
+                outDelta.setScalar(signX * (0.78 * wCorner + 0.28 * wCheek), 0.95 * wCorner + 0.45 * wCheek, -0.22 * wCorner + 0.32 * wCheek);
             }
             break;
         }
@@ -853,25 +939,25 @@ function evaluateSingleMuscleDisplacement(muscleName, pos, region, pivots, outDe
         case 'mouthFrownR': {
             const isLeft = muscleName === 'mouthFrownL';
             const signX = isLeft ? -1 : 1;
-            const w = regionFalloff(pos, new Vec3(signX * 2.25, -3.35, 6.5), new Vec3(1.85, 1.55, 2.6));
+            const w = regionFalloff(pos, new Vec3(signX * 1.98, -3.22, 6.2), new Vec3(1.55, 1.32, 2.4));
             if (w > 0.002) {
-                outDelta.setScalar(signX * 0.28 * w, -1.12 * w, -0.15 * w);
+                outDelta.setScalar(signX * 0.22 * w, -0.92 * w, -0.12 * w);
             }
             break;
         }
         case 'mouthPucker': {
-            const w = regionFalloff(pos, new Vec3(0, -3.2, 6.9), new Vec3(3.1, 1.75, 2.8));
+            const w = regionFalloff(pos, new Vec3(0, -3.1, 6.6), new Vec3(2.6, 1.48, 2.6));
             if (w > 0.002) {
-                outDelta.setScalar(-pos.x * 0.42 * w, 0, 1.05 * w);
+                outDelta.setScalar(-pos.x * 0.38 * w, 0, 0.88 * w);
             }
             break;
         }
         case 'mouthFunnel': {
-            const w = regionFalloff(pos, new Vec3(0, -3.2, 6.9), new Vec3(3.0, 1.75, 2.8));
+            const w = regionFalloff(pos, new Vec3(0, -3.1, 6.6), new Vec3(2.5, 1.48, 2.6));
             if (w > 0.002) {
-                const dy = pos.y - -3.2;
-                const vertPart = dy >= 0 ? 0.55 : -0.65;
-                outDelta.setScalar(-pos.x * 0.28 * w, vertPart * w, 0.92 * w);
+                const dy = pos.y - -3.1;
+                const vertPart = dy >= 0 ? 0.45 : -0.55;
+                outDelta.setScalar(-pos.x * 0.24 * w, vertPart * w, 0.78 * w);
             }
             break;
         }
@@ -879,9 +965,9 @@ function evaluateSingleMuscleDisplacement(muscleName, pos, region, pivots, outDe
         case 'mouthUpperUpR': {
             const isLeft = muscleName === 'mouthUpperUpL';
             const signX = isLeft ? -1 : 1;
-            const w = regionFalloff(pos, new Vec3(signX * 1.25, -2.55, 7.2), new Vec3(1.45, 1.05, 2.5));
+            const w = regionFalloff(pos, new Vec3(signX * 1.05, -2.55, 6.8), new Vec3(1.25, 0.92, 2.3));
             if (w > 0.002) {
-                outDelta.setScalar(signX * 0.18 * w, 0.98 * w, 0.25 * w);
+                outDelta.setScalar(signX * 0.14 * w, 0.82 * w, 0.20 * w);
             }
             break;
         }
@@ -889,26 +975,26 @@ function evaluateSingleMuscleDisplacement(muscleName, pos, region, pivots, outDe
         case 'mouthLowerDownR': {
             const isLeft = muscleName === 'mouthLowerDownL';
             const signX = isLeft ? -1 : 1;
-            const w = regionFalloff(pos, new Vec3(signX * 1.25, -3.85, 7.0), new Vec3(1.55, 1.10, 2.5));
+            const w = regionFalloff(pos, new Vec3(signX * 1.05, -3.65, 6.6), new Vec3(1.32, 0.95, 2.3));
             if (w > 0.002) {
-                outDelta.setScalar(signX * 0.22 * w, -0.95 * w, 0.28 * w);
+                outDelta.setScalar(signX * 0.18 * w, -0.8 * w, 0.22 * w);
             }
             break;
         }
         case 'mouthShrugUpper': {
-            const wLip = regionFalloff(pos, new Vec3(0, -3.3, 7.1), new Vec3(2.5, 1.45, 2.6));
-            const wChin = regionFalloff(pos, new Vec3(0, -6.4, 6.4), new Vec3(2.4, 1.8, 2.6));
+            const wLip = regionFalloff(pos, new Vec3(0, -3.15, 6.8), new Vec3(2.1, 1.25, 2.4));
+            const wChin = regionFalloff(pos, new Vec3(0, -5.5, 6.2), new Vec3(2.1, 1.5, 2.4));
             const w = Math.max(wLip, wChin * 0.85);
             if (w > 0.002) {
-                outDelta.setScalar(0, 0.78 * w, 0.35 * wLip - 0.15 * wChin);
+                outDelta.setScalar(0, 0.65 * w, 0.28 * wLip - 0.12 * wChin);
             }
             break;
         }
         case 'mouthPress': {
-            const w = regionFalloff(pos, new Vec3(0, -3.2, 7.1), new Vec3(2.8, 1.35, 2.6));
+            const w = regionFalloff(pos, new Vec3(0, -3.1, 6.8), new Vec3(2.3, 1.15, 2.4));
             if (w > 0.002) {
-                const dy = pos.y - -3.2;
-                outDelta.setScalar(0, -dy * 0.48 * w, -0.42 * w);
+                const dy = pos.y - -3.1;
+                outDelta.setScalar(0, -dy * 0.45 * w, -0.35 * w);
             }
             break;
         }
@@ -1972,6 +2058,14 @@ function evaluateFaceDeformation(cartridge, pose, outPositions, outNormals) {
     const erm = _eyeRightMat.toArray();
     const jm = _jawMat.toArray();
     const nm = _neckMat.toArray();
+    const elm0 = elm[0], elm1 = elm[1], elm2 = elm[2];
+    const elm4 = elm[4], elm5 = elm[5], elm6 = elm[6];
+    const elm8 = elm[8], elm9 = elm[9], elm10 = elm[10];
+    const elm12 = elm[12], elm13 = elm[13], elm14 = elm[14];
+    const erm0 = erm[0], erm1 = erm[1], erm2 = erm[2];
+    const erm4 = erm[4], erm5 = erm[5], erm6 = erm[6];
+    const erm8 = erm[8], erm9 = erm[9], erm10 = erm[10];
+    const erm12 = erm[12], erm13 = erm[13], erm14 = erm[14];
     const jm0 = jm[0], jm1 = jm[1], jm2 = jm[2];
     const jm4 = jm[4], jm5 = jm[5], jm6 = jm[6];
     const jm8 = jm[8], jm9 = jm[9], jm10 = jm[10];
@@ -1997,29 +2091,29 @@ function evaluateFaceDeformation(cartridge, pose, outPositions, outNormals) {
         let ny = outNormals[idx + 1];
         let nz = outNormals[idx + 2];
         if (doEyeL) {
-            const rx = elm[0] * px + elm[4] * py + elm[8] * pz + elm[12];
-            const ry = elm[1] * px + elm[5] * py + elm[9] * pz + elm[13];
-            const rz = elm[2] * px + elm[6] * py + elm[10] * pz + elm[14];
+            const rx = elm0 * px + elm4 * py + elm8 * pz + elm12;
+            const ry = elm1 * px + elm5 * py + elm9 * pz + elm13;
+            const rz = elm2 * px + elm6 * py + elm10 * pz + elm14;
             px = rx;
             py = ry;
             pz = rz;
-            const rnx = elm[0] * nx + elm[4] * ny + elm[8] * nz;
-            const rny = elm[1] * nx + elm[5] * ny + elm[9] * nz;
-            const rnz = elm[2] * nx + elm[6] * ny + elm[10] * nz;
+            const rnx = elm0 * nx + elm4 * ny + elm8 * nz;
+            const rny = elm1 * nx + elm5 * ny + elm9 * nz;
+            const rnz = elm2 * nx + elm6 * ny + elm10 * nz;
             nx = rnx;
             ny = rny;
             nz = rnz;
         }
         else if (doEyeR) {
-            const rx = erm[0] * px + erm[4] * py + erm[8] * pz + erm[12];
-            const ry = erm[1] * px + erm[5] * py + erm[9] * pz + erm[13];
-            const rz = erm[2] * px + erm[6] * py + erm[10] * pz + erm[14];
+            const rx = erm0 * px + erm4 * py + erm8 * pz + erm12;
+            const ry = erm1 * px + erm5 * py + erm9 * pz + erm13;
+            const rz = erm2 * px + erm6 * py + erm10 * pz + erm14;
             px = rx;
             py = ry;
             pz = rz;
-            const rnx = erm[0] * nx + erm[4] * ny + erm[8] * nz;
-            const rny = erm[1] * nx + erm[5] * ny + erm[9] * nz;
-            const rnz = erm[2] * nx + erm[6] * ny + erm[10] * nz;
+            const rnx = erm0 * nx + erm4 * ny + erm8 * nz;
+            const rny = erm1 * nx + erm5 * ny + erm9 * nz;
+            const rnz = erm2 * nx + erm6 * ny + erm10 * nz;
             nx = rnx;
             ny = rny;
             nz = rnz;
@@ -2050,7 +2144,7 @@ function evaluateFaceDeformation(cartridge, pose, outPositions, outNormals) {
         }
         if (hasNeck) {
             const baseY = basePositions[idx + 1];
-            if (region !== FACE_REGION_IDS.skin || baseY >= -7.2) {
+            if (region !== FACE_REGION_IDS.skin || baseY >= -5.8) {
                 const rx = nm0 * px + nm4 * py + nm8 * pz + nm12;
                 const ry = nm1 * px + nm5 * py + nm9 * pz + nm13;
                 const rz = nm2 * px + nm6 * py + nm10 * pz + nm14;
@@ -2065,7 +2159,7 @@ function evaluateFaceDeformation(cartridge, pose, outPositions, outNormals) {
                 nz = rnz;
             }
             else if (baseY > -9.8) {
-                const neckWeight = Utils.smoothstep(-9.8, -7.2, baseY);
+                const neckWeight = Utils.smoothstep(-9.8, -5.8, baseY);
                 const rx = nm0 * px + nm4 * py + nm8 * pz + nm12;
                 const ry = nm1 * px + nm5 * py + nm9 * pz + nm13;
                 const rz = nm2 * px + nm6 * py + nm10 * pz + nm14;
@@ -2105,26 +2199,145 @@ function generateFaceAtlasPixels(appearance, damageTier = 0, size = 256) {
             const u = x / (size - 1);
             const pIdx = (y * size + x) * 4;
             if (v < 0.75) {
-                const su = u;
-                const sv = 1.0 - v / 0.75;
-                const centerDist = Math.abs(su - 0.5) * 2.0;
-                const shade = Utils.smoothstep(0.0, 0.22, sv) * (1.0 - centerDist * 0.28);
+                const uGrid = (u - 0.5) / 0.48;
+                const absU = Math.abs(uGrid);
+                const sv = Utils.clamp((0.74 - v) / 0.72, 0.0, 1.0);
+                const yHead = Utils.lerp(-11, 10.5, sv);
+                const shade = Utils.smoothstep(0.0, 0.25, sv) * (1.0 - absU * 0.22);
                 col.setScalar(Utils.lerp(shadow.x, skin.x, shade), Utils.lerp(shadow.y, skin.y, shade), Utils.lerp(shadow.z, skin.z, shade));
-                const pore = rng.float(-0.012, 0.012);
+                const pore = rng.float(-0.01, 0.010);
                 col.addScalar(pore);
-                const cheekWarmth = Math.exp(-Math.pow((sv - 0.52) / 0.12, 2)) * (1.0 - centerDist * 0.5);
-                col.x += cheekWarmth * 0.045;
-                col.y -= cheekWarmth * 0.015;
-                const dEyeL = Math.hypot((su - 0.40) * 2.8, (sv - 0.56) * 3.2);
-                const dEyeR = Math.hypot((su - 0.60) * 2.8, (sv - 0.56) * 3.2);
-                const socketAO = Math.exp(-dEyeL * dEyeL * 4.5) + Math.exp(-dEyeR * dEyeR * 4.5);
-                col.scale(1.0 - socketAO * 0.22);
-                const dLip = Math.hypot((su - 0.5) / 0.075, (sv - 0.34) / 0.042);
-                if (dLip < 1.3) {
-                    const lipW = Utils.smoothstep(1.3, 0.45, dLip);
-                    col.x = Utils.lerp(col.x, lip.x, lipW);
-                    col.y = Utils.lerp(col.y, lip.y, lipW);
-                    col.z = Utils.lerp(col.z, lip.z, lipW);
+                const submentalShadow = Math.exp(-Math.pow((yHead - -6.1) / 0.75, 2)) *
+                    Math.exp(-Math.pow(absU / 0.34, 2));
+                col.scale(1.0 - submentalShadow * 0.26);
+                const jawStubble = Utils.smoothstep(-6.4, -5.2, yHead) *
+                    Utils.smoothstep(-1.5, -2.8, yHead) *
+                    Utils.smoothstep(0.38, 0.16, absU) *
+                    (1.0 - Math.exp(-Math.pow((yHead - -3.1) / 0.65, 2)) * Math.exp(-Math.pow(absU / 0.09, 2)));
+                if (jawStubble > 0.01) {
+                    const stubbleNoise = 0.85 + 0.15 * Math.sin(uGrid * 190.0 + yHead * 45.0);
+                    const stW = jawStubble * 0.14 * stubbleNoise;
+                    col.x = Utils.lerp(col.x, brow.x * 0.85, stW);
+                    col.y = Utils.lerp(col.y, brow.y * 0.88, stW);
+                    col.z = Utils.lerp(col.z, brow.z * 0.95, stW);
+                }
+                const cheekWarmth = Math.exp(-Math.pow((yHead - 0.35) / 1.65, 2)) *
+                    Math.exp(-Math.pow((absU - 0.16) / 0.14, 2));
+                col.x += cheekWarmth * 0.055;
+                col.y -= cheekWarmth * 0.012;
+                col.z -= cheekWarmth * 0.015;
+                const philtrumGroove = Math.exp(-Math.pow(absU / 0.016, 2)) *
+                    Math.exp(-Math.pow((yHead - -1.95) / 0.55, 2));
+                const philtrumColumns = Math.exp(-Math.pow((absU - 0.024) / 0.010, 2)) *
+                    Math.exp(-Math.pow((yHead - -1.95) / 0.55, 2));
+                col.scale(1.0 - philtrumGroove * 0.14 + philtrumColumns * 0.05);
+                const nlTargetU = 0.062 + Math.max(0, -0.9 - yHead) * 0.022;
+                const nasolabial = Math.exp(-Math.pow((absU - nlTargetU) / 0.014, 2)) *
+                    Utils.smoothstep(-0.7, -1.3, yHead) *
+                    Utils.smoothstep(-3.6, -2.6, yHead);
+                col.scale(1.0 - nasolabial * 0.18);
+                const noseBridgeHighlight = Math.exp(-Math.pow(absU / 0.022, 2)) *
+                    Utils.smoothstep(-0.85, -0.35, yHead) *
+                    Utils.smoothstep(2.6, 1.5, yHead);
+                col.addScalar(noseBridgeHighlight * 0.055);
+                const alarShadow = Math.exp(-Math.pow((absU - 0.064) / 0.016, 2)) *
+                    Math.exp(-Math.pow((yHead - -0.92) / 0.42, 2));
+                col.scale(1.0 - alarShadow * 0.24);
+                const nostrilDark = Math.exp(-Math.pow((absU - 0.035) / 0.016, 2)) *
+                    Math.exp(-Math.pow((yHead - -1.16) / 0.22, 2));
+                if (nostrilDark > 0.01) {
+                    const nW = Utils.clamp(nostrilDark * 0.88, 0.0, 0.88);
+                    col.x = Utils.lerp(col.x, 0.08, nW);
+                    col.y = Utils.lerp(col.y, 0.04, nW);
+                    col.z = Utils.lerp(col.z, 0.04, nW);
+                }
+                const lipArch = Math.max(0, 1.0 - Math.pow(absU / 0.095, 2));
+                if (lipArch > 0.0 && yHead > -3.85 && yHead < -2.35) {
+                    const cupidDip = 0.10 * Math.exp(-Math.pow(absU / 0.018, 2));
+                    const cupidPeak = 0.12 * Math.exp(-Math.pow((absU - 0.028) / 0.018, 2));
+                    const upperBorderY = -3.1 + (0.52 + cupidPeak - cupidDip) * lipArch;
+                    const lowerBorderY = -3.1 - 0.62 * lipArch;
+                    if (yHead >= lowerBorderY && yHead <= upperBorderY) {
+                        const distToEdge = Math.min(upperBorderY - yHead, yHead - lowerBorderY);
+                        const lipW = Utils.smoothstep(0.0, 0.16, distToEdge) * Utils.smoothstep(0.0, 0.25, lipArch);
+                        const isUpperLip = yHead >= -3.1;
+                        const lipShade = isUpperLip
+                            ? 0.84
+                            : 1.04 + 0.14 * Math.exp(-Math.pow((yHead - -3.38) / 0.16, 2)) * Math.exp(-Math.pow(absU / 0.045, 2));
+                        col.x = Utils.lerp(col.x, lip.x * lipShade, lipW);
+                        col.y = Utils.lerp(col.y, lip.y * lipShade, lipW);
+                        col.z = Utils.lerp(col.z, lip.z * lipShade, lipW);
+                    }
+                    const stomionLine = Math.exp(-Math.pow((yHead - -3.1) / 0.075, 2)) *
+                        Utils.smoothstep(0.0, 0.15, lipArch);
+                    if (stomionLine > 0.01) {
+                        const stLineW = Utils.clamp(stomionLine * 0.82, 0.0, 0.82);
+                        col.x = Utils.lerp(col.x, 0.12, stLineW);
+                        col.y = Utils.lerp(col.y, 0.04, stLineW);
+                        col.z = Utils.lerp(col.z, 0.05, stLineW);
+                    }
+                }
+                const dSocket = Math.hypot((absU - 0.123) / 0.075, (yHead - 1.92) / 0.95);
+                if (dSocket < 1.5) {
+                    const socketAO = Math.exp(-dSocket * dSocket * 1.65);
+                    col.scale(1.0 - socketAO * 0.18);
+                }
+                const eyeArchX = Math.max(0, 1.0 - Math.pow((absU - 0.123) / 0.062, 2));
+                if (eyeArchX > 0.0) {
+                    const upperLashY = 1.85 + 0.36 * eyeArchX;
+                    const lashW = Math.exp(-Math.pow((yHead - upperLashY) / 0.09, 2)) * Utils.smoothstep(0.0, 0.2, eyeArchX);
+                    if (lashW > 0.01) {
+                        col.x = Utils.lerp(col.x, brow.x * 0.35, lashW * 0.85);
+                        col.y = Utils.lerp(col.y, brow.y * 0.35, lashW * 0.85);
+                        col.z = Utils.lerp(col.z, brow.z * 0.35, lashW * 0.85);
+                    }
+                    const foldY = 1.85 + 0.68 * eyeArchX;
+                    const foldW = Math.exp(-Math.pow((yHead - foldY) / 0.08, 2)) * Utils.smoothstep(0.0, 0.25, eyeArchX);
+                    col.scale(1.0 - foldW * 0.28);
+                    const lowerRimY = 1.85 - 0.36 * eyeArchX;
+                    const lowerW = Math.exp(-Math.pow((yHead - lowerRimY) / 0.09, 2)) * Utils.smoothstep(0.0, 0.2, eyeArchX);
+                    col.scale(1.0 - lowerW * 0.22);
+                }
+                if (absU > 0.032 && absU < 0.210 && yHead > 2.65 && yHead < 3.75) {
+                    const browT = Utils.clamp((absU - 0.038) / 0.160, 0.0, 1.0);
+                    const browCenterY = 3.05 + 0.26 * Math.sin(browT * Math.PI * 0.85);
+                    const browHalfH = 0.24 * (1.0 - 0.45 * Math.pow(browT, 1.6));
+                    const dBrowY = Math.abs(yHead - browCenterY) / Math.max(0.05, browHalfH);
+                    if (dBrowY < 1.35) {
+                        const browEndFade = Utils.smoothstep(0.0, 0.12, browT) * Utils.smoothstep(1.0, 0.82, browT);
+                        const browW = Utils.smoothstep(1.35, 0.25, dBrowY) * browEndFade;
+                        const browStroke = 0.78 + 0.22 * Math.sin((absU * 260.0) - (yHead * 32.0));
+                        col.x = Utils.lerp(col.x, brow.x * browStroke, browW * 0.88);
+                        col.y = Utils.lerp(col.y, brow.y * browStroke, browW * 0.88);
+                        col.z = Utils.lerp(col.z, brow.z * browStroke, browW * 0.88);
+                    }
+                }
+                const earConcha = Math.exp(-Math.pow((absU - 0.50) / 0.035, 2)) *
+                    Math.exp(-Math.pow((yHead - 0.35) / 1.05, 2));
+                col.scale(1.0 - earConcha * 0.24);
+                const foreheadHairlineY = 6.35 -
+                    0.32 * Math.exp(-Math.pow(absU / 0.05, 2)) +
+                    0.55 * Math.exp(-Math.pow((absU - 0.19) / 0.07, 2));
+                const foreheadHair = Utils.smoothstep(foreheadHairlineY - 0.30, foreheadHairlineY + 0.22, yHead) *
+                    Utils.smoothstep(0.40, 0.26, absU);
+                const sideburnHair = Utils.smoothstep(0.28, 0.34, absU) *
+                    Utils.smoothstep(0.47, 0.43, absU) *
+                    Utils.smoothstep(-0.15, 0.45, yHead) *
+                    Utils.smoothstep(7.5, 5.0, yHead);
+                const backScalpHair = Utils.smoothstep(0.38, 0.46, absU) *
+                    Utils.smoothstep(-3.8, -3.1, yHead);
+                const crownCapHair = Utils.smoothstep(6.45, 7.05, yHead);
+                const hairMask = Utils.clamp(Math.max(foreheadHair, sideburnHair, backScalpHair, crownCapHair), 0.0, 1.0);
+                if (hairMask > 0.01) {
+                    const strand = 0.84 +
+                        0.16 * Math.sin(uGrid * 185.0 + yHead * 14.0) * Math.cos(yHead * 26.0);
+                    const crownSpec = 1.0 + 0.18 * Utils.smoothstep(5.5, 8.8, yHead) * (1.0 - absU * 0.5);
+                    const hR = brow.x * strand * crownSpec;
+                    const hG = brow.y * strand * crownSpec;
+                    const hB = brow.z * strand * crownSpec;
+                    col.x = Utils.lerp(col.x, hR, hairMask);
+                    col.y = Utils.lerp(col.y, hG, hairMask);
+                    col.z = Utils.lerp(col.z, hB, hairMask);
                 }
             }
             else if (u < 0.50) {

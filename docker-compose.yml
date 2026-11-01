@@ -1,0 +1,18 @@
+services:
+
+  facer:
+    build:
+      context: ./
+      dockerfile: dockerfile
+    container_name: facer
+    volumes:
+      - ./:/usr/src/app
+      - facer_node_modules:/usr/src/app/node_modules
+
+volumes:
+  facer_node_modules:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/node_modules
