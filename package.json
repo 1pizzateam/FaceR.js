@@ -1,0 +1,68 @@
+{
+  "name": "@1pizzateam/facer",
+  "version": "0.1.0",
+  "description": "Ken Perlin Responsive Face runtime engine and FACS anatomical rig library built on Spock and RoostR",
+  "type": "module",
+  "sideEffects": false,
+  "main": "dist/facer.js",
+  "types": "dist/facer.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/facer.d.ts",
+      "import": "./dist/facer.js"
+    }
+  },
+  "keywords": [
+    "perlin",
+    "face",
+    "animation",
+    "facs",
+    "morph",
+    "webgl",
+    "3d",
+    "roostr",
+    "spock",
+    "typescript"
+  ],
+  "homepage": "https://github.com/1pizzateam/FaceR.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/1pizzateam/FaceR.js.git"
+  },
+  "bugs": {
+    "url": "https://github.com/1pizzateam/FaceR.js/issues"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Ludovic Cluber"
+  },
+  "contributors": [],
+  "scripts": {
+    "build": "npm run build:lib && npm run test",
+    "build:lib": "node ./scripts/clear.js && tsc && npm run rollup && node ./scripts/copy.js",
+    "rollup": "rollup --config rollup.config.mjs",
+    "test": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --coverage"
+  },
+  "files": [
+    "dist/"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">= 22"
+  },
+  "devDependencies": {
+    "@types/jest": "29.5.14",
+    "@types/node": "26.4.1",
+    "jest": "29.7.0",
+    "jest-environment-jsdom": "29.7.0",
+    "rollup": "4.63.1",
+    "rollup-plugin-dts": "6.5.1",
+    "typescript": "6.0.3"
+  },
+  "dependencies": {
+    "@1pizzateam/roostr": "0.9.0",
+    "@1pizzateam/spock": "4.5.0"
+  }
+}
