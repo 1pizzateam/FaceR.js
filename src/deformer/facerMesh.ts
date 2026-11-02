@@ -75,13 +75,83 @@ export function evaluateFaceDeformation(
     }
   }
 
-  // 2. Precompute 4x3 affine pivot matrices (`Mat4x3`) for eyeball, jaw, and neck rotations
+  // 2. Apply 3D physical trauma swelling & broken-nose deflection when `pose.damageTier > 0`
   const vertexCount = (outPositions.length / 3) | 0;
   const regionMap = cartridge.vertexRegionMap;
   const jawWeights = cartridge.jawWeights;
   const pivots = cartridge.pivots;
   const basePositions = cartridge.positions;
+  const traumaTier = Utils.clamp(pose.damageTier | 0, 0, 4);
 
+  if (traumaTier > 0) {
+    for (let i = 0; i < vertexCount; i++) {
+      if (regionMap[i] !== FACE_REGION_IDS.skin) continue;
+      const idx = i * 3;
+      const bx = basePositions[idx];
+      const by = basePositions[idx + 1];
+      const bz = basePositions[idx + 2];
+      if (bz < 2.2) continue;
+
+      let px = outPositions[idx];
+      let py = outPositions[idx + 1];
+      let pz = outPositions[idx + 2];
+      const nx = outNormals[idx];
+      const ny = outNormals[idx + 1];
+      const nz = outNormals[idx + 2];
+
+      // Tier 1+: Left malar & infraorbital hematoma puffiness + swollen upper left eyelid droop
+      const dMalarL = Math.hypot((bx - -1.95) / 1.15, (by - 1.05) / 0.85, (bz - 5.45) / 1.40);
+      if (dMalarL < 1.0) {
+        const wSwell = Utils.smoothstep(1.0, 0.0, dMalarL) * (0.085 * traumaTier);
+        px += nx * wSwell;
+        py += ny * wSwell - 0.03 * wSwell;
+        pz += nz * wSwell * 1.15;
+      }
+
+      const dLidDroopL = Math.hypot((bx - -1.78) / 0.72, (by - 2.18) / 0.36, (bz - 5.55) / 1.10);
+      if (dLidDroopL < 1.0) {
+        const wDroop = Utils.smoothstep(1.0, 0.0, dLidDroopL) * (0.055 * traumaTier);
+        py -= wDroop;
+        pz += wDroop * 0.45;
+      }
+
+      // Tier 2+: Right supraorbital brow ridge welt + swollen split lower lip
+      if (traumaTier >= 2) {
+        const tier2Scale = traumaTier - 1;
+        const dBrowWeltR = Math.hypot((bx - 2.05) / 0.95, (by - 2.92) / 0.52, (bz - 5.75) / 1.25);
+        if (dBrowWeltR < 1.0) {
+          const wWelt = Utils.smoothstep(1.0, 0.0, dBrowWeltR) * (0.075 * tier2Scale);
+          px += nx * wWelt;
+          py += ny * wWelt * 0.6;
+          pz += nz * wWelt * 1.2;
+        }
+
+        const dLipSplit = Math.hypot((bx - 0.68) / 0.58, (by - -2.62) / 0.38, (bz - 6.35) / 1.10);
+        if (dLipSplit < 1.0) {
+          const wLip = Utils.smoothstep(1.0, 0.0, dLipSplit) * (0.07 * tier2Scale);
+          py -= wLip * 0.55;
+          pz += wLip * 1.15;
+        }
+      }
+
+      // Tier 3+: Crooked / fractured nasal bridge lateral deflection + swollen dorsum
+      if (traumaTier >= 3) {
+        const tier3Scale = traumaTier - 2;
+        const dNoseBridge = Math.hypot(bx / 0.92, (by - 0.68) / 1.05, (bz - 6.75) / 1.35);
+        if (dNoseBridge < 1.0) {
+          const wNose = Utils.smoothstep(1.0, 0.0, dNoseBridge);
+          px += 0.16 * tier3Scale * wNose;
+          pz += 0.05 * tier3Scale * wNose;
+        }
+      }
+
+      outPositions[idx] = px;
+      outPositions[idx + 1] = py;
+      outPositions[idx + 2] = pz;
+    }
+  }
+
+  // 3. Precompute 4x3 affine pivot matrices (`Mat4x3`) for eyeball, jaw, and neck rotations
   const hasEyeL = pose.eyeLeftQuat.vector.getMagnitude(true) > 1e-8;
   const hasEyeR = pose.eyeRightQuat.vector.getMagnitude(true) > 1e-8;
   const hasJaw = pose.jawQuat.vector.getMagnitude(true) > 1e-8;
@@ -257,8 +327,12 @@ export function generateFaceAtlasPixels(
   const iris = appearance.irisColor;
   const sclera = appearance.scleraColor;
   const brow = appearance.browColor;
+  const hair = appearance.hairColor ?? appearance.browColor;
+  const hairStyle = appearance.hairStyle ?? 'bald';
   const teeth = appearance.teethColor;
 
+  const clampedTier = Utils.clamp(damageTier | 0, 0, 4);
+  const seedPhase = ((appearance.damageSeed % 97) / 97) * Math.PI * 2;
   const col = new Vec3();
 
   for (let y = 0; y < size; y++) {
@@ -286,138 +360,140 @@ export function generateFaceAtlasPixels(
         const pore = rng.float(-0.010, 0.010);
         col.addScalar(pore);
 
-        // Submental under-chin & neck transition shadow (yHead around -6.6..-5.5)
+        // Submental under-chin & neck transition shadow (yHead around -5.5..-4.5)
         const submentalShadow =
-          Math.exp(-Math.pow((yHead - -6.1) / 0.75, 2)) *
-          Math.exp(-Math.pow(absU / 0.34, 2));
-        col.scale(1.0 - submentalShadow * 0.26);
+          Math.exp(-Math.pow((yHead - -5.2) / 0.70, 2)) *
+          Math.exp(-Math.pow(absU / 0.30, 2));
+        col.scale(1.0 - submentalShadow * 0.24);
 
-        // Subtle lower-face / jawline beard-stubble cool tone (yHead in -6.2..-1.8, anterior)
+        // Subtle lower-face / jawline beard-stubble cool tone (yHead in -5.2..-1.2, anterior)
         const jawStubble =
-          Utils.smoothstep(-6.4, -5.2, yHead) *
-          Utils.smoothstep(-1.5, -2.8, yHead) *
-          Utils.smoothstep(0.38, 0.16, absU) *
-          (1.0 - Math.exp(-Math.pow((yHead - -3.10) / 0.65, 2)) * Math.exp(-Math.pow(absU / 0.09, 2)));
+          Utils.smoothstep(-5.4, -4.4, yHead) *
+          Utils.smoothstep(-1.0, -2.0, yHead) *
+          Utils.smoothstep(0.34, 0.14, absU) *
+          (1.0 - Math.exp(-Math.pow((yHead - -2.42) / 0.65, 2)) * Math.exp(-Math.pow(absU / 0.092, 2)));
         if (jawStubble > 0.01) {
           const stubbleNoise = 0.85 + 0.15 * Math.sin(uGrid * 190.0 + yHead * 45.0);
-          const stW = jawStubble * 0.14 * stubbleNoise;
+          const stW = jawStubble * 0.12 * stubbleNoise;
           col.x = Utils.lerp(col.x, brow.x * 0.85, stW);
           col.y = Utils.lerp(col.y, brow.y * 0.88, stW);
           col.z = Utils.lerp(col.z, brow.z * 0.95, stW);
         }
 
-        // Cheek & nasal warmth around mid-face (yHead in -1.2..2.0)
+        // Cheek & nasal warmth around mid-face (yHead in -0.9..1.8)
         const cheekWarmth =
-          Math.exp(-Math.pow((yHead - 0.35) / 1.65, 2)) *
-          Math.exp(-Math.pow((absU - 0.16) / 0.14, 2));
+          Math.exp(-Math.pow((yHead - 0.35) / 1.55, 2)) *
+          Math.exp(-Math.pow((absU - 0.14) / 0.12, 2));
         col.x += cheekWarmth * 0.055;
         col.y -= cheekWarmth * 0.012;
         col.z -= cheekWarmth * 0.015;
 
         // Nasolabial fold & philtrum shading
         const philtrumGroove =
-          Math.exp(-Math.pow(absU / 0.016, 2)) *
-          Math.exp(-Math.pow((yHead - -1.95) / 0.55, 2));
+          Math.exp(-Math.pow(absU / 0.013, 2)) *
+          Math.exp(-Math.pow((yHead - -1.28) / 0.36, 2));
         const philtrumColumns =
-          Math.exp(-Math.pow((absU - 0.024) / 0.010, 2)) *
-          Math.exp(-Math.pow((yHead - -1.95) / 0.55, 2));
-        col.scale(1.0 - philtrumGroove * 0.14 + philtrumColumns * 0.05);
+          Math.exp(-Math.pow((absU - 0.019) / 0.008, 2)) *
+          Math.exp(-Math.pow((yHead - -1.28) / 0.36, 2));
+        col.scale(1.0 - philtrumGroove * 0.12 + philtrumColumns * 0.045);
 
-        const nlTargetU = 0.062 + Math.max(0, -0.9 - yHead) * 0.022;
+        const nlTargetU = 0.056 + Math.max(0, -0.55 - yHead) * 0.020;
         const nasolabial =
-          Math.exp(-Math.pow((absU - nlTargetU) / 0.014, 2)) *
-          Utils.smoothstep(-0.7, -1.3, yHead) *
-          Utils.smoothstep(-3.6, -2.6, yHead);
+          Math.exp(-Math.pow((absU - nlTargetU) / 0.013, 2)) *
+          Utils.smoothstep(-0.35, -0.95, yHead) *
+          Utils.smoothstep(-2.9, -2.1, yHead);
         col.scale(1.0 - nasolabial * 0.18);
 
-        // Nasal bridge highlight, alar crease, and dark nostril cavities
+        // Nasal bridge highlight, alar crease, and dark nostril cavities (placed inside 3D nostrils at yHead = -0.45)
         const noseBridgeHighlight =
-          Math.exp(-Math.pow(absU / 0.022, 2)) *
-          Utils.smoothstep(-0.85, -0.35, yHead) *
-          Utils.smoothstep(2.6, 1.5, yHead);
+          Math.exp(-Math.pow(absU / 0.020, 2)) *
+          Utils.smoothstep(-0.20, 0.25, yHead) *
+          Utils.smoothstep(2.5, 1.4, yHead);
         col.addScalar(noseBridgeHighlight * 0.055);
 
         const alarShadow =
-          Math.exp(-Math.pow((absU - 0.064) / 0.016, 2)) *
-          Math.exp(-Math.pow((yHead - -0.92) / 0.42, 2));
-        col.scale(1.0 - alarShadow * 0.24);
+          Math.exp(-Math.pow((absU - 0.068) / 0.012, 2)) *
+          Math.exp(-Math.pow((yHead - -0.38) / 0.24, 2));
+        col.scale(1.0 - alarShadow * 0.22);
 
         const nostrilDark =
-          Math.exp(-Math.pow((absU - 0.035) / 0.016, 2)) *
-          Math.exp(-Math.pow((yHead - -1.16) / 0.22, 2));
+          Math.exp(-Math.pow((absU - 0.032) / 0.011, 2)) *
+          Math.exp(-Math.pow((yHead - -0.45) / 0.085, 2));
         if (nostrilDark > 0.01) {
-          const nW = Utils.clamp(nostrilDark * 0.88, 0.0, 0.88);
-          col.x = Utils.lerp(col.x, 0.08, nW);
-          col.y = Utils.lerp(col.y, 0.04, nW);
-          col.z = Utils.lerp(col.z, 0.04, nW);
+          const nW = Utils.clamp(nostrilDark * 0.92, 0.0, 0.92);
+          col.x = Utils.lerp(col.x, 0.05, nW);
+          col.y = Utils.lerp(col.y, 0.025, nW);
+          col.z = Utils.lerp(col.z, 0.025, nW);
         }
 
-        // Vermilion upper & lower lips + Cupid's bow + oral stomion crease (yHead ~ -3.10)
-        const lipArch = Math.max(0, 1.0 - Math.pow(absU / 0.095, 2));
-        if (lipArch > 0.0 && yHead > -3.85 && yHead < -2.35) {
-          const cupidDip = 0.10 * Math.exp(-Math.pow(absU / 0.018, 2));
-          const cupidPeak = 0.12 * Math.exp(-Math.pow((absU - 0.028) / 0.018, 2));
-          const upperBorderY = -3.10 + (0.52 + cupidPeak - cupidDip) * lipArch;
-          const lowerBorderY = -3.10 - 0.62 * lipArch;
+        // Vermilion upper & lower lips + Cupid's bow + 3D-aligned curved oral stomion fissure
+        const uMouth = absU / 0.088;
+        const lipArch = Math.max(0, 1.0 - uMouth * uMouth);
+        if (lipArch > 0.0 && yHead > -3.05 && yHead < -1.55) {
+          const stomionY = -2.35 - 0.28 * uMouth * uMouth;
+          const cupidDip = 0.08 * Math.exp(-Math.pow(absU / 0.012, 2));
+          const cupidPeak = 0.09 * Math.exp(-Math.pow((absU - 0.015) / 0.014, 2));
+          const upperBorderY = stomionY + (0.58 + cupidPeak - cupidDip) * lipArch;
+          const lowerBorderY = stomionY - 0.54 * Math.pow(lipArch, 0.85);
 
           if (yHead >= lowerBorderY && yHead <= upperBorderY) {
             const distToEdge = Math.min(upperBorderY - yHead, yHead - lowerBorderY);
-            const lipW = Utils.smoothstep(0.0, 0.16, distToEdge) * Utils.smoothstep(0.0, 0.25, lipArch);
-            const isUpperLip = yHead >= -3.10;
-            // Upper lip angles downward (slightly darker), lower lip catches light (specular highlight)
+            const lipW = Utils.smoothstep(0.0, 0.13, distToEdge) * Utils.smoothstep(0.0, 0.20, lipArch);
+            const isUpperLip = yHead >= stomionY;
+            const lowerPillowY = stomionY - 0.18 * lipArch;
             const lipShade = isUpperLip
-              ? 0.84
-              : 1.04 + 0.14 * Math.exp(-Math.pow((yHead - -3.38) / 0.16, 2)) * Math.exp(-Math.pow(absU / 0.045, 2));
+              ? 0.86
+              : 1.04 + 0.14 * Math.exp(-Math.pow((yHead - lowerPillowY) / 0.15, 2)) * Math.exp(-Math.pow(absU / 0.044, 2));
             col.x = Utils.lerp(col.x, lip.x * lipShade, lipW);
             col.y = Utils.lerp(col.y, lip.y * lipShade, lipW);
             col.z = Utils.lerp(col.z, lip.z * lipShade, lipW);
           }
 
-          // Crisp dark oral stomion parting line at yHead = -3.10
+          // Crisp dark oral stomion parting line aligned to 3D mouth fissure (yHead = -2.35..-2.63)
           const stomionLine =
-            Math.exp(-Math.pow((yHead - -3.10) / 0.075, 2)) *
-            Utils.smoothstep(0.0, 0.15, lipArch);
+            Math.exp(-Math.pow((yHead - stomionY) / 0.055, 2)) *
+            Utils.smoothstep(0.0, 0.12, lipArch);
           if (stomionLine > 0.01) {
-            const stLineW = Utils.clamp(stomionLine * 0.82, 0.0, 0.82);
+            const stLineW = Utils.clamp(stomionLine * 0.80, 0.0, 0.80);
             col.x = Utils.lerp(col.x, 0.12, stLineW);
             col.y = Utils.lerp(col.y, 0.04, stLineW);
             col.z = Utils.lerp(col.z, 0.05, stLineW);
           }
         }
 
-        // Orbital socket shading, eyelids, upper eyelash line & supra-tarsal crease (eye center: absU = 0.123, yHead = 1.85)
-        const dSocket = Math.hypot((absU - 0.123) / 0.075, (yHead - 1.92) / 0.95);
+        // Orbital socket shading, eyelids, upper eyelash line & supra-tarsal crease (eye center: absU = 0.100, yHead = 1.86)
+        const dSocket = Math.hypot((absU - 0.100) / 0.068, (yHead - 1.88) / 0.85);
         if (dSocket < 1.5) {
           const socketAO = Math.exp(-dSocket * dSocket * 1.65);
           col.scale(1.0 - socketAO * 0.18);
         }
 
-        const eyeArchX = Math.max(0, 1.0 - Math.pow((absU - 0.123) / 0.062, 2));
+        const eyeArchX = Math.max(0, 1.0 - Math.pow((absU - 0.100) / 0.056, 2));
         if (eyeArchX > 0.0) {
           // Dark upper eyelash margin
-          const upperLashY = 1.85 + 0.36 * eyeArchX;
-          const lashW = Math.exp(-Math.pow((yHead - upperLashY) / 0.09, 2)) * Utils.smoothstep(0.0, 0.2, eyeArchX);
+          const upperLashY = 1.86 + 0.28 * eyeArchX;
+          const lashW = Math.exp(-Math.pow((yHead - upperLashY) / 0.08, 2)) * Utils.smoothstep(0.0, 0.2, eyeArchX);
           if (lashW > 0.01) {
             col.x = Utils.lerp(col.x, brow.x * 0.35, lashW * 0.85);
             col.y = Utils.lerp(col.y, brow.y * 0.35, lashW * 0.85);
             col.z = Utils.lerp(col.z, brow.z * 0.35, lashW * 0.85);
           }
           // Supra-tarsal upper eyelid fold crease
-          const foldY = 1.85 + 0.68 * eyeArchX;
-          const foldW = Math.exp(-Math.pow((yHead - foldY) / 0.08, 2)) * Utils.smoothstep(0.0, 0.25, eyeArchX);
-          col.scale(1.0 - foldW * 0.28);
+          const foldY = 1.86 + 0.56 * eyeArchX;
+          const foldW = Math.exp(-Math.pow((yHead - foldY) / 0.075, 2)) * Utils.smoothstep(0.0, 0.25, eyeArchX);
+          col.scale(1.0 - foldW * 0.26);
 
           // Lower eyelid rim shadow
-          const lowerRimY = 1.85 - 0.36 * eyeArchX;
-          const lowerW = Math.exp(-Math.pow((yHead - lowerRimY) / 0.09, 2)) * Utils.smoothstep(0.0, 0.2, eyeArchX);
+          const lowerRimY = 1.86 - 0.28 * eyeArchX;
+          const lowerW = Math.exp(-Math.pow((yHead - lowerRimY) / 0.08, 2)) * Utils.smoothstep(0.0, 0.2, eyeArchX);
           col.scale(1.0 - lowerW * 0.22);
         }
 
-        // Painted eyebrow hair bed (absU in 0.040..0.198, yHead ~ 3.15)
-        if (absU > 0.032 && absU < 0.210 && yHead > 2.65 && yHead < 3.75) {
-          const browT = Utils.clamp((absU - 0.038) / 0.160, 0.0, 1.0);
-          const browCenterY = 3.05 + 0.26 * Math.sin(browT * Math.PI * 0.85);
-          const browHalfH = 0.24 * (1.0 - 0.45 * Math.pow(browT, 1.6));
+        // Painted eyebrow hair bed (absU in 0.030..0.175, yHead ~ 2.85)
+        if (absU > 0.028 && absU < 0.180 && yHead > 2.45 && yHead < 3.35) {
+          const browT = Utils.clamp((absU - 0.032) / 0.135, 0.0, 1.0);
+          const browCenterY = 2.76 + 0.18 * Math.sin(browT * Math.PI * 0.85) - 0.10 * browT;
+          const browHalfH = 0.20 * (1.0 - 0.42 * Math.pow(browT, 1.6));
           const dBrowY = Math.abs(yHead - browCenterY) / Math.max(0.05, browHalfH);
           if (dBrowY < 1.35) {
             const browEndFade = Utils.smoothstep(0.0, 0.12, browT) * Utils.smoothstep(1.0, 0.82, browT);
@@ -429,60 +505,338 @@ export function generateFaceAtlasPixels(
           }
         }
 
-        // Ear concha & antihelix shading (absU around 0.46..0.54, yHead in -1.3..2.1)
+        // Ear concha & antihelix shading (absU around 0.48..0.58, yHead in -0.5..2.4)
         const earConcha =
-          Math.exp(-Math.pow((absU - 0.50) / 0.035, 2)) *
-          Math.exp(-Math.pow((yHead - 0.35) / 1.05, 2));
-        col.scale(1.0 - earConcha * 0.24);
+          Math.exp(-Math.pow((absU - 0.53) / 0.035, 2)) *
+          Math.exp(-Math.pow((yHead - 0.85) / 1.05, 2));
+        col.scale(1.0 - earConcha * 0.22);
 
-        // Sculpted Haircut, Forehead Hairline, Sideburns & Nape Hair
-        const foreheadHairlineY =
-          6.35 -
-          0.32 * Math.exp(-Math.pow(absU / 0.05, 2)) +
-          0.55 * Math.exp(-Math.pow((absU - 0.19) / 0.07, 2));
-        const foreheadHair =
-          Utils.smoothstep(foreheadHairlineY - 0.30, foreheadHairlineY + 0.22, yHead) *
-          Utils.smoothstep(0.40, 0.26, absU);
-        const sideburnHair =
-          Utils.smoothstep(0.28, 0.34, absU) *
-          Utils.smoothstep(0.47, 0.43, absU) *
-          Utils.smoothstep(-0.15, 0.45, yHead) *
-          Utils.smoothstep(7.5, 5.0, yHead);
-        const backScalpHair =
-          Utils.smoothstep(0.38, 0.46, absU) *
-          Utils.smoothstep(-3.8, -3.1, yHead);
-        const crownCapHair = Utils.smoothstep(6.45, 7.05, yHead);
-        const hairMask = Utils.clamp(
-          Math.max(foreheadHair, sideburnHair, backScalpHair, crownCapHair),
-          0.0,
-          1.0
-        );
-        if (hairMask > 0.01) {
-          const strand =
-            0.84 +
-            0.16 * Math.sin(uGrid * 185.0 + yHead * 14.0) * Math.cos(yHead * 26.0);
-          const crownSpec = 1.0 + 0.18 * Utils.smoothstep(5.5, 8.8, yHead) * (1.0 - absU * 0.5);
-          const hR = brow.x * strand * crownSpec;
-          const hG = brow.y * strand * crownSpec;
-          const hB = brow.z * strand * crownSpec;
-          col.x = Utils.lerp(col.x, hR, hairMask);
-          col.y = Utils.lerp(col.y, hG, hairMask);
-          col.z = Utils.lerp(col.z, hB, hairMask);
+        // Subtle cranial crown highlight / scalp follicle micro-texture (no blocky painted sideburns or ear overlap)
+        const crownHighlight =
+          Utils.smoothstep(4.5, 8.2, yHead) * (1.0 - absU * 0.45);
+        col.addScalar(crownHighlight * 0.035);
+
+        // ====================================================================
+        // ANATOMICALLY ANCHORED MULTI-STAGE FACIAL TRAUMA (Tiers 1..4)
+        // ====================================================================
+        if (clampedTier > 0) {
+          const tierNorm = clampedTier / 4.0;
+          const grimeWave =
+            0.5 +
+            0.3 * Math.sin(uGrid * 72.0 + yHead * 9.5 + seedPhase) +
+            0.2 * Math.cos(uGrid * 155.0 - yHead * 18.0);
+
+          // 1. Tier 1+: Combat Soot, Ash & Directional Cheekbone/Forehead Scuffs
+          const cheekSoot =
+            Math.exp(-Math.pow((absU - 0.155) / 0.075, 2)) *
+            Math.exp(-Math.pow((yHead - 0.45) / 1.15, 2));
+          const bridgeSoot =
+            Math.exp(-Math.pow(absU / 0.038, 2)) *
+            Math.exp(-Math.pow((yHead - 0.95) / 0.85, 2));
+          const browSoot =
+            Math.exp(-Math.pow((absU - 0.085) / 0.13, 2)) *
+            Math.exp(-Math.pow((yHead - 4.1) / 1.05, 2));
+          const chinSoot =
+            Math.exp(-Math.pow(absU / 0.095, 2)) *
+            Math.exp(-Math.pow((yHead - -4.15) / 0.68, 2));
+
+          const sootMask =
+            Utils.clamp((cheekSoot * 0.85 + bridgeSoot * 0.75 + browSoot * 0.65 + chinSoot * 0.6) * grimeWave, 0, 1) *
+            (0.16 + 0.14 * tierNorm);
+          col.x = Utils.lerp(col.x, col.x * 0.42 + 0.03, sootMask);
+          col.y = Utils.lerp(col.y, col.y * 0.38 + 0.025, sootMask);
+          col.z = Utils.lerp(col.z, col.z * 0.36 + 0.025, sootMask);
+
+          // 2. Tier 1+: Left Periorbital & Malar Contusion (Multi-Ring Subsurface Hematoma)
+          // Adapts multiplicatively to any skin tone: yellowish-green bilirubin outer ring -> plum/violet inner core
+          const bruiseWarp = 0.012 * Math.sin(yHead * 6.5 + seedPhase) + 0.008 * Math.cos(uGrid * 95.0);
+          const dMalarBruise = Math.hypot(
+            (uGrid - -0.108 + bruiseWarp) / (0.056 + 0.009 * clampedTier),
+            (yHead - 1.18) / (0.72 + 0.11 * clampedTier)
+          );
+          if (dMalarBruise < 1.35) {
+            const outerRing =
+              Utils.smoothstep(1.35, 0.82, dMalarBruise) *
+              Utils.smoothstep(0.35, 0.85, dMalarBruise) *
+              (0.22 + 0.12 * tierNorm);
+            const midPlum =
+              Utils.smoothstep(1.05, 0.25, dMalarBruise) * (0.34 + 0.28 * tierNorm);
+            const deepCore =
+              Utils.smoothstep(0.62, 0.0, dMalarBruise) * (0.25 + 0.42 * tierNorm);
+
+            // Outer bilirubin olive-yellow tint
+            col.x = Utils.lerp(col.x, col.x * 0.88 + 0.04, outerRing);
+            col.y = Utils.lerp(col.y, col.y * 0.84 + 0.03, outerRing);
+            col.z = Utils.lerp(col.z, col.z * 0.48, outerRing);
+
+            // Mid-ring reddish-violet contusion
+            col.x = Utils.lerp(col.x, col.x * 0.56 + 0.08, midPlum);
+            col.y = Utils.lerp(col.y, col.y * 0.24 + 0.01, midPlum);
+            col.z = Utils.lerp(col.z, col.z * 0.48 + 0.05, midPlum);
+
+            // Deep periorbital hematoma core
+            col.x = Utils.lerp(col.x, col.x * 0.30 + 0.03, deepCore);
+            col.y = Utils.lerp(col.y, col.y * 0.14 + 0.01, deepCore);
+            col.z = Utils.lerp(col.z, col.z * 0.32 + 0.04, deepCore);
+          }
+
+          // Cheekbone & nasal bridge epidermal scrape / raw erythema at Tier 1+
+          const scrapeLineY = 0.72 + (uGrid - -0.145) * 2.4;
+          const dCheekScrape =
+            Math.abs(yHead - scrapeLineY) / 0.14 +
+            Math.max(0, Math.abs(uGrid - -0.145) - 0.042) * 18.0;
+          if (dCheekScrape < 1.0) {
+            const scrapeStreaks = 0.55 + 0.45 * Math.sin((uGrid * 380.0) + (yHead * 45.0));
+            const wScrape = Utils.smoothstep(1.0, 0.1, dCheekScrape) * scrapeStreaks * (0.42 + 0.25 * tierNorm);
+            col.x = Utils.lerp(col.x, 0.48, wScrape);
+            col.y = Utils.lerp(col.y, 0.11, wScrape);
+            col.z = Utils.lerp(col.z, 0.10, wScrape);
+          }
+
+          // 3. Tier 2+: Right Supraorbital Brow Laceration, Left Nostril Epistaxis, Split Lower Lip & Right Jaw Contusion
+          if (clampedTier >= 2) {
+            const t2 = (clampedTier - 1) / 3.0;
+
+            // Secondary right mandibular / jaw bruise (uGrid ~ +0.145, yHead ~ -2.05)
+            const dJawBruise = Math.hypot((uGrid - 0.145) / 0.055, (yHead - -2.05) / 0.75);
+            if (dJawBruise < 1.1) {
+              const wJawB = Utils.smoothstep(1.1, 0.15, dJawBruise) * (0.28 + 0.26 * t2);
+              col.x = Utils.lerp(col.x, col.x * 0.48 + 0.04, wJawB);
+              col.y = Utils.lerp(col.y, col.y * 0.24 + 0.01, wJawB);
+              col.z = Utils.lerp(col.z, col.z * 0.42 + 0.04, wJawB);
+            }
+
+            // Right Supraorbital Brow Gash (diagonal cut across right brow ridge: uGrid in 0.068..0.158, yHead ~ 2.95)
+            if (uGrid > 0.055 && uGrid < 0.172 && yHead > 2.15 && yHead < 3.65) {
+              const cutTargetY = 3.05 - (uGrid - 0.075) * 4.2;
+              const uSpan = Math.max(0, Math.abs(uGrid - 0.115) - 0.038);
+              const dCut = Math.abs(yHead - cutTargetY) + uSpan * 5.2;
+              if (dCut < 0.26) {
+                const wHalo = Utils.smoothstep(0.26, 0.04, dCut) * (0.55 + 0.25 * t2);
+                col.x = Utils.lerp(col.x, 0.46, wHalo);
+                col.y = Utils.lerp(col.y, 0.09, wHalo);
+                col.z = Utils.lerp(col.z, 0.09, wHalo);
+
+                const wSlit = Utils.smoothstep(0.065, 0.012, dCut);
+                col.x = Utils.lerp(col.x, 0.16, wSlit);
+                col.y = Utils.lerp(col.y, 0.015, wSlit);
+                col.z = Utils.lerp(col.z, 0.02, wSlit);
+              }
+            }
+
+            // Gravity-driven crimson rivulet trickling down from the outer right brow gash along the temple/cheek
+            const browTrickleBottomY = clampedTier === 2 ? 0.55 : clampedTier === 3 ? -1.45 : -3.65;
+            if (yHead <= 2.75 && yHead >= browTrickleBottomY && uGrid > 0.11 && uGrid < 0.19) {
+              const trickleProgress = Utils.clamp((2.75 - yHead) / (2.75 - browTrickleBottomY), 0.0, 1.0);
+              const meanderU =
+                0.146 +
+                0.0045 * Math.sin(yHead * 3.8 + seedPhase) +
+                0.0025 * Math.cos(yHead * 9.5);
+              const halfWidth = 0.0055 * (1.0 - 0.45 * trickleProgress) * (0.9 + 0.25 * t2);
+              const dTrickle = Math.abs(uGrid - meanderU);
+              if (dTrickle < halfWidth * 2.2) {
+                const taper = Utils.smoothstep(1.0, 0.78, trickleProgress);
+                const wEdge = Utils.smoothstep(halfWidth * 2.2, halfWidth * 0.4, dTrickle) * taper;
+                const wWet = Utils.smoothstep(halfWidth * 0.75, 0.0, dTrickle) * taper;
+                // Coagulated dark crimson edge
+                col.x = Utils.lerp(col.x, 0.26, wEdge * 0.88);
+                col.y = Utils.lerp(col.y, 0.02, wEdge * 0.88);
+                col.z = Utils.lerp(col.z, 0.025, wEdge * 0.88);
+                // Wet arterial highlight center
+                col.x = Utils.lerp(col.x, 0.56, wWet * 0.75);
+                col.y = Utils.lerp(col.y, 0.04, wWet * 0.75);
+                col.z = Utils.lerp(col.z, 0.045, wWet * 0.75);
+              }
+            }
+
+            // Left Nostril Epistaxis (Nosebleed starting directly inside the 3D left nostril at uGrid = -0.032, yHead = -0.45)
+            const noseBleedBottomY = clampedTier === 2 ? -2.32 : clampedTier === 3 ? -3.45 : -5.15;
+            if (yHead <= -0.42 && yHead >= noseBleedBottomY && uGrid > -0.068 && uGrid < 0.005) {
+              const nbProgress = Utils.clamp((-0.42 - yHead) / (-0.42 - noseBleedBottomY), 0.0, 1.0);
+              const nbPathU =
+                -0.031 +
+                0.005 * Math.sin((yHead + 0.45) * 2.4) +
+                0.002 * Math.cos(yHead * 7.2 + seedPhase);
+              const nbHalfW = (0.0052 + 0.0035 * t2) * (1.0 - 0.35 * nbProgress);
+              const dNb = Math.abs(uGrid - nbPathU);
+              if (dNb < nbHalfW * 2.2) {
+                const nbTaper = Utils.smoothstep(1.0, 0.80, nbProgress);
+                const wNbEdge = Utils.smoothstep(nbHalfW * 2.2, nbHalfW * 0.35, dNb) * nbTaper;
+                const wNbCore = Utils.smoothstep(nbHalfW * 0.7, 0.0, dNb) * nbTaper;
+                col.x = Utils.lerp(col.x, 0.24, wNbEdge * 0.92);
+                col.y = Utils.lerp(col.y, 0.018, wNbEdge * 0.92);
+                col.z = Utils.lerp(col.z, 0.022, wNbEdge * 0.92);
+
+                col.x = Utils.lerp(col.x, 0.54, wNbCore * 0.82);
+                col.y = Utils.lerp(col.y, 0.035, wNbCore * 0.82);
+                col.z = Utils.lerp(col.z, 0.04, wNbCore * 0.82);
+              }
+            }
+
+            // Split Right Lower Vermilion Lip (uGrid ~ +0.038, yHead ~ -2.62)
+            const dLipBruise = Math.hypot((uGrid - 0.038) / 0.018, (yHead - -2.62) / 0.22);
+            if (dLipBruise < 1.0) {
+              const wLipB = Utils.smoothstep(1.0, 0.2, dLipBruise) * (0.65 + 0.25 * t2);
+              col.x = Utils.lerp(col.x, 0.28, wLipB);
+              col.y = Utils.lerp(col.y, 0.04, wLipB);
+              col.z = Utils.lerp(col.z, 0.08, wLipB);
+
+              const dLipCut = Math.hypot((uGrid - 0.038 + (yHead - -2.62) * 0.015) / 0.0045, (yHead - -2.62) / 0.14);
+              if (dLipCut < 1.0) {
+                const wLipCut = Utils.smoothstep(1.0, 0.15, dLipCut);
+                col.x = Utils.lerp(col.x, 0.14, wLipCut);
+                col.y = Utils.lerp(col.y, 0.01, wLipCut);
+                col.z = Utils.lerp(col.z, 0.015, wLipCut);
+              }
+            }
+          }
+
+          // 4. Tier 3+: Severe Black Eye, Fractured Nasal Bridge Hematoma & Left Zygomatic Laceration
+          if (clampedTier >= 3) {
+            const t3 = (clampedTier - 2) / 2.0;
+
+            // Deep periorbital black-eye ring encircling the left eye socket (uGrid = -0.100, yHead = 1.72)
+            const dBlackEye = Math.hypot((uGrid - -0.102) / 0.058, (yHead - 1.68) / 0.68);
+            if (dBlackEye < 1.15) {
+              const wBlackEye = Utils.smoothstep(1.15, 0.22, dBlackEye) * (0.48 + 0.28 * t3);
+              col.x = Utils.lerp(col.x, col.x * 0.22 + 0.03, wBlackEye);
+              col.y = Utils.lerp(col.y, col.y * 0.10 + 0.01, wBlackEye);
+              col.z = Utils.lerp(col.z, col.z * 0.28 + 0.04, wBlackEye);
+            }
+
+            // Broken nasal bridge saddle contusion & dorsal split (absU < 0.052, yHead ~ 1.05)
+            const dNoseSaddle = Math.hypot(uGrid / 0.048, (yHead - 1.05) / 0.52);
+            if (dNoseSaddle < 1.0) {
+              const wSaddle = Utils.smoothstep(1.0, 0.15, dNoseSaddle) * (0.52 + 0.25 * t3);
+              col.x = Utils.lerp(col.x, col.x * 0.35 + 0.08, wSaddle);
+              col.y = Utils.lerp(col.y, col.y * 0.14 + 0.01, wSaddle);
+              col.z = Utils.lerp(col.z, col.z * 0.28 + 0.03, wSaddle);
+
+              // Transverse skin split across the fractured nasal bridge
+              const dBridgeSplit = Math.hypot(uGrid / 0.026, (yHead - (1.08 + uGrid * 1.8)) / 0.055);
+              if (dBridgeSplit < 1.0) {
+                const wSplit = Utils.smoothstep(1.0, 0.1, dBridgeSplit);
+                col.x = Utils.lerp(col.x, 0.18, wSplit * 0.9);
+                col.y = Utils.lerp(col.y, 0.015, wSplit * 0.9);
+                col.z = Utils.lerp(col.z, 0.02, wSplit * 0.9);
+              }
+            }
+
+            // Left zygomatic cheek laceration (uGrid in -0.19..-0.085, yHead ~ 0.32)
+            if (uGrid > -0.205 && uGrid < -0.075 && yHead > -0.35 && yHead < 0.95) {
+              const cheekCutY = 0.28 + (uGrid - -0.135) * 3.1;
+              const uCheekSpan = Math.max(0, Math.abs(uGrid - -0.135) - 0.042);
+              const dCheekCut = Math.abs(yHead - cheekCutY) + uCheekSpan * 5.0;
+              if (dCheekCut < 0.24) {
+                const wChHalo = Utils.smoothstep(0.24, 0.04, dCheekCut) * 0.65;
+                col.x = Utils.lerp(col.x, 0.44, wChHalo);
+                col.y = Utils.lerp(col.y, 0.07, wChHalo);
+                col.z = Utils.lerp(col.z, 0.08, wChHalo);
+
+                const wChSlit = Utils.smoothstep(0.06, 0.012, dCheekCut);
+                col.x = Utils.lerp(col.x, 0.15, wChSlit);
+                col.y = Utils.lerp(col.y, 0.012, wChSlit);
+                col.z = Utils.lerp(col.z, 0.018, wChSlit);
+              }
+            }
+          }
+
+          // 5. Tier 4 (<20% HP): Critical Scalp/Forehead Arterial Stream & Bilateral Oral/Nasal Hemorrhage
+          if (clampedTier >= 4) {
+            // Heavy arterial stream from upper left forehead hairline (uGrid ~ -0.058, yHead = 6.2) down past inner brow & cheek
+            if (yHead <= 6.2 && yHead >= -2.8 && uGrid > -0.11 && uGrid < 0.01) {
+              const fProg = Utils.clamp((6.2 - yHead) / 9.0, 0.0, 1.0);
+              const fPathU =
+                -0.056 +
+                0.012 * Math.sin((6.2 - yHead) * 0.55) +
+                0.004 * Math.sin(yHead * 4.2 + seedPhase);
+              const fHalfW = 0.0085 * (1.0 - 0.35 * fProg);
+              const dFStream = Math.abs(uGrid - fPathU);
+              if (dFStream < fHalfW * 2.3) {
+                const fTaper = Utils.smoothstep(1.0, 0.82, fProg);
+                const wFEdge = Utils.smoothstep(fHalfW * 2.3, fHalfW * 0.35, dFStream) * fTaper;
+                const wFWet = Utils.smoothstep(fHalfW * 0.75, 0.0, dFStream) * fTaper;
+                col.x = Utils.lerp(col.x, 0.22, wFEdge * 0.92);
+                col.y = Utils.lerp(col.y, 0.015, wFEdge * 0.92);
+                col.z = Utils.lerp(col.z, 0.02, wFEdge * 0.92);
+
+                col.x = Utils.lerp(col.x, 0.58, wFWet * 0.85);
+                col.y = Utils.lerp(col.y, 0.035, wFWet * 0.85);
+                col.z = Utils.lerp(col.z, 0.04, wFWet * 0.85);
+              }
+            }
+
+            // Right nostril secondary blood trickle + commissure mouth-corner blood streams down the chin
+            if (yHead <= -0.45 && yHead >= -4.2 && uGrid > 0.005 && uGrid < 0.062) {
+              const rNbPath = 0.031 + 0.003 * Math.cos(yHead * 5.0);
+              const dRNb = Math.abs(uGrid - rNbPath);
+              if (dRNb < 0.011) {
+                const rTaper = Utils.smoothstep(-4.2, -3.1, yHead);
+                const wRNb = Utils.smoothstep(0.011, 0.002, dRNb) * rTaper;
+                col.x = Utils.lerp(col.x, 0.38, wRNb * 0.88);
+                col.y = Utils.lerp(col.y, 0.025, wRNb * 0.88);
+                col.z = Utils.lerp(col.z, 0.03, wRNb * 0.88);
+              }
+            }
+
+            // Oral commissure blood trickling from right mouth corner (uGrid ~ +0.062, yHead: -2.55..-5.2)
+            if (yHead <= -2.50 && yHead >= -5.25 && uGrid > 0.032 && uGrid < 0.092) {
+              const mPathU = 0.058 + 0.004 * Math.sin((yHead + 2.5) * 3.8);
+              const dMStream = Math.abs(uGrid - mPathU);
+              if (dMStream < 0.014) {
+                const mTaper = Utils.smoothstep(-5.25, -4.1, yHead);
+                const wMEdge = Utils.smoothstep(0.014, 0.003, dMStream) * mTaper;
+                const wMWet = Utils.smoothstep(0.005, 0.0, dMStream) * mTaper;
+                col.x = Utils.lerp(col.x, 0.22, wMEdge * 0.90);
+                col.y = Utils.lerp(col.y, 0.015, wMEdge * 0.90);
+                col.z = Utils.lerp(col.z, 0.02, wMEdge * 0.90);
+
+                col.x = Utils.lerp(col.x, 0.52, wMWet * 0.80);
+                col.y = Utils.lerp(col.y, 0.03, wMWet * 0.80);
+                col.z = Utils.lerp(col.z, 0.035, wMWet * 0.80);
+              }
+            }
+          }
         }
       } else if (u < 0.50) {
         // Bottom-Left (u: 0..0.50, v: 0.75..1.0): Left Eyeball (0.02..0.24) & Right Eyeball (0.26..0.48)
-        const eyeCenterU = u < 0.25 ? 0.13 : 0.37;
+        const isLeftEye = u < 0.25;
+        const eyeCenterU = isLeftEye ? 0.13 : 0.37;
         const eyeCenterV = 0.87;
         const dx = (u - eyeCenterU) / 0.11;
         const dy = (v - eyeCenterV) / 0.11;
         const r = Math.hypot(dx, dy);
+        const angle = Math.atan2(dy, dx);
 
         const vignette = Utils.clamp(1.0 - r * 0.18, 0.72, 1.0);
         col.copy(sclera).scale(vignette);
 
+        // Ocular Trauma: Bloodshot scleral capillaries (Tier 2+) & Subconjunctival hemorrhage on Left Eye (Tier 3+)
+        if (clampedTier >= 2 && r > 0.44 && r < 0.98) {
+          const scleralMask = Utils.smoothstep(0.44, 0.54, r) * Utils.smoothstep(0.98, 0.82, r);
+          const veinWave = Math.pow(
+            0.5 + 0.5 * Math.sin(angle * 15.0 + Math.sin(r * 22.0 + seedPhase) * 2.2),
+            6.0
+          );
+          const veinW = scleralMask * veinWave * (0.25 + 0.18 * (clampedTier - 1));
+          col.x = Utils.lerp(col.x, 0.68, veinW);
+          col.y = Utils.lerp(col.y, 0.08, veinW);
+          col.z = Utils.lerp(col.z, 0.09, veinW);
+
+          if (clampedTier >= 3 && isLeftEye) {
+            // Ruptured subconjunctival blood patch on outer/lower sclera of the bruised left eye
+            const dHemorrhage = Math.hypot((dx - -0.58) / 0.28, (dy - 0.12) / 0.32);
+            if (dHemorrhage < 1.0) {
+              const wHem = Utils.smoothstep(1.0, 0.25, dHemorrhage) * scleralMask * (0.65 + 0.22 * (clampedTier - 3));
+              col.x = Utils.lerp(col.x, 0.54, wHem);
+              col.y = Utils.lerp(col.y, 0.04, wHem);
+              col.z = Utils.lerp(col.z, 0.05, wHem);
+            }
+          }
+        }
+
         if (r < 0.50) {
           const limbus = Utils.smoothstep(0.50, 0.43, r);
-          const angle = Math.atan2(dy, dx);
           const fiber = 0.88 + 0.18 * Math.sin(angle * 24.0) * Math.cos(r * 18.0);
           const limbalDark = Utils.smoothstep(0.36, 0.48, r) * 0.45;
           const irR = iris.x * fiber * (1.0 - limbalDark);
@@ -515,72 +869,69 @@ export function generateFaceAtlasPixels(
         const gumBlend = Utils.smoothstep(0.0, 0.18, tv) * Utils.smoothstep(1.0, 0.82, tv);
         const shade = (0.75 + 0.25 * toothGroove) * (0.72 + 0.28 * gumBlend);
         col.copy(teeth).scale(shade);
+
+        // Dental Trauma: Blood-stained gumline & interdental grooves (Tier 3+), Chipped tooth gap (Tier 4)
+        if (clampedTier >= 3) {
+          const grooveBlood = (1.0 - toothGroove) * 0.85 + (1.0 - gumBlend) * 0.65;
+          const wBloodTeeth = Utils.clamp(grooveBlood * (clampedTier === 3 ? 0.52 : 0.78), 0.0, 0.88);
+          col.x = Utils.lerp(col.x, 0.45, wBloodTeeth);
+          col.y = Utils.lerp(col.y, 0.03, wBloodTeeth);
+          col.z = Utils.lerp(col.z, 0.04, wBloodTeeth);
+        }
+        if (clampedTier >= 4 && tu > 0.37 && tu < 0.48 && tv > 0.32 && tv < 0.72) {
+          // Chipped / broken lateral incisor cavity
+          col.setScalar(0.14, 0.02, 0.03);
+        }
       } else if (u < 0.84 && v >= 0.94) {
         // Inner Oral Cavity (u: 0.50..0.84, v: 0.94..1.0)
         col.setScalar(0.22, 0.06, 0.07);
-      } else {
-        // Eyebrow & Hair region (u: 0.84..1.0, v: 0.75..1.0)
+      } else if (v < 0.85) {
+        // Eyebrow region (u: 0.84..1.0, v: 0.75..0.85)
         const bu = (u - 0.84) / 0.16;
-        const hairStreak = 0.82 + 0.24 * Math.sin(bu * 65.0 + v * 18.0);
-        col.copy(brow).scale(hairStreak);
+        const browStreak = 0.82 + 0.24 * Math.sin(bu * 65.0 + v * 18.0);
+        col.copy(brow).scale(browStreak);
+      } else {
+        // 3D Cranial Hair / Headgear region (u: 0.84..1.0, v: 0.85..1.0)
+        const hu = Utils.clamp((u - 0.85) / 0.13, 0.0, 1.0);
+        const hv = Utils.clamp((v - 0.86) / 0.12, 0.0, 1.0);
+        if (hairStyle === 'combat_helmet') {
+          // Tactical Space Marine armored helmet plating & panel seams
+          const panelSeam =
+            Math.exp(-Math.pow((hv - 0.22) / 0.025, 2)) +
+            Math.exp(-Math.pow((hv - 0.76) / 0.025, 2));
+          const visorStripe = Utils.smoothstep(0.18, 0.0, hv) * 0.28;
+          const armorShade = (0.78 + 0.28 * hv - 0.35 * Math.min(1.0, panelSeam) - visorStripe);
+          col.copy(hair).scale(armorShade);
+        } else if (hairStyle === 'buzz_fade') {
+          // High-and-tight fade gradient from skin tone at lower border (hv=0) to hairColor on crown
+          const fadeW = Utils.smoothstep(0.0, 0.42, hv);
+          const follicle = 0.84 + 0.18 * Math.sin(hu * 140.0) * Math.cos(hv * 120.0);
+          col.setScalar(
+            Utils.lerp(skin.x * 0.78, hair.x * follicle, fadeW),
+            Utils.lerp(skin.y * 0.78, hair.y * follicle, fadeW),
+            Utils.lerp(skin.z * 0.78, hair.z * follicle, fadeW)
+          );
+        } else if (hairStyle === 'afro_short') {
+          // Tightly coiled sponge/curl clusters
+          const coilPattern = 0.72 + 0.32 * Math.sin(hu * 95.0) * Math.sin(hv * 95.0);
+          col.copy(hair).scale(coilPattern * (0.82 + 0.22 * hv));
+        } else if (hairStyle === 'dreadlocks') {
+          // Braided lock cords with deep dark grooves between locks
+          const cord = Math.pow(0.5 + 0.5 * Math.cos(hu * Math.PI * 14.0), 0.45);
+          const twist = 0.82 + 0.22 * Math.sin(hv * 85.0 + hu * 25.0);
+          col.copy(hair).scale((0.38 + 0.72 * cord) * twist);
+        } else {
+          // Anisotropic hair strands (flattop, mohawk, slick_back)
+          const strands = 0.78 + 0.26 * Math.sin(hu * 85.0 + hv * 24.0);
+          const rootShadow = Utils.smoothstep(0.0, 0.16, hv);
+          col.copy(hair).scale(strands * (0.68 + 0.36 * rootShadow));
+        }
       }
 
       pixels[pIdx] = Utils.clamp(Math.round(col.x * 255), 0, 255);
       pixels[pIdx + 1] = Utils.clamp(Math.round(col.y * 255), 0, 255);
       pixels[pIdx + 2] = Utils.clamp(Math.round(col.z * 255), 0, 255);
       pixels[pIdx + 3] = 255;
-    }
-  }
-
-  // Layer progressive procedural bruises & blood splatters on the Skin region (v < 0.75)
-  const skinHeight = Math.floor(size * 0.74);
-  const clampedTier = Utils.clamp(damageTier | 0, 0, 4);
-  if (clampedTier > 0) {
-    const splatterCount = clampedTier * 8;
-    for (let s = 0; s < splatterCount; s++) {
-      const cx = Math.floor(rng.float(0.32, 0.68) * size);
-      const cy = Math.floor(rng.float(0.24, 0.76) * skinHeight);
-      const radius = Math.floor(rng.float(3, 7 + clampedTier * 3) * (size / 256));
-      const isBlood = s % 2 === 0 || clampedTier >= 3;
-
-      for (let dy = -radius; dy <= radius; dy++) {
-        const py = cy + dy;
-        if (py < 0 || py >= skinHeight) continue;
-        for (let dx = -radius; dx <= radius; dx++) {
-          const px = cx + dx;
-          if (px < 0 || px >= size) continue;
-          const dist = Math.hypot(dx, dy) / Math.max(1, radius);
-          if (dist <= 1.0) {
-            const w = Utils.smoothstep(1.0, 0.15, dist) * (0.55 + 0.45 * (clampedTier / 4));
-            const pIdx = (py * size + px) * 4;
-            const targetR = isBlood ? 145 : 92;
-            const targetG = isBlood ? 14 : 38;
-            const targetB = isBlood ? 18 : 68;
-            pixels[pIdx] = Math.round(Utils.lerp(pixels[pIdx], targetR, w));
-            pixels[pIdx + 1] = Math.round(Utils.lerp(pixels[pIdx + 1], targetG, w));
-            pixels[pIdx + 2] = Math.round(Utils.lerp(pixels[pIdx + 2], targetB, w));
-          }
-        }
-      }
-    }
-
-    // Nasal/oral bleeding streaks for heavy damage tiers (Tier 3 & Tier 4)
-    if (clampedTier >= 3) {
-      const noseX = Math.floor(0.5 * size);
-      const startY = Math.floor(0.52 * skinHeight);
-      const endY = Math.floor((0.68 + (clampedTier - 2) * 0.08) * skinHeight);
-      const streakWidth = Math.max(2, Math.floor((clampedTier * 2.5 * size) / 256));
-      for (let py = startY; py <= Math.min(skinHeight - 1, endY); py++) {
-        for (let dx = -streakWidth; dx <= streakWidth; dx++) {
-          const px = noseX + dx;
-          if (px < 0 || px >= size) continue;
-          const w = Utils.smoothstep(streakWidth + 1, 0, Math.abs(dx)) * 0.85;
-          const pIdx = (py * size + px) * 4;
-          pixels[pIdx] = Math.round(Utils.lerp(pixels[pIdx], 132, w));
-          pixels[pIdx + 1] = Math.round(Utils.lerp(pixels[pIdx + 1], 12, w));
-          pixels[pIdx + 2] = Math.round(Utils.lerp(pixels[pIdx + 2], 14, w));
-        }
-      }
     }
   }
 

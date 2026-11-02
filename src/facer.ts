@@ -1,8 +1,12 @@
 import { Vec2, Vec3, Quat, Utils } from '@1pizzateam/spock';
 import { CustomMesh, Mesh, Texture } from '@1pizzateam/roostr';
 import {
+  BASE_HEAD_IDS,
+  BaseHeadId,
   FACS_MUSCLE_NAMES,
   FacsMuscleName,
+  HAIRCUT_STYLES,
+  HaircutStyleName,
   FACE_REGIONS,
   FACE_REGION_IDS,
   FaceRegionName,
@@ -19,10 +23,14 @@ import {
 } from './interfaces';
 import { Perlin1D } from './noise/perlin1d';
 import {
+  BASE_HEAD_ARCHETYPES,
   IBaseHeadTopology,
+  HAIR_CAP_VERTEX_COUNT,
   createBaseHeadTopology,
   getCanonicalBaseHead,
-  computeSmoothNormals
+  computeSmoothNormals,
+  parseObjToTopology,
+  applyHaircutStyleToPositions
 } from './anatomy/baseHead';
 import { applyMacroProportions, computeFacsMuscles } from './anatomy/muscleTransfer';
 import {
@@ -31,6 +39,7 @@ import {
   createDefaultPersonality,
   createDefaultAppearance,
   createDefaultCartridge,
+  parseObjToCartridge,
   rebuildCartridgeRig,
   serializeCartridge,
   hydrateCartridge
@@ -81,6 +90,7 @@ export class FaceR {
 
   private _gl: WebGLRenderingContext | null = null;
   private _health = 100;
+  private _traumaTime = 0;
 
   constructor(
     cartridge?: IFaceCartridge | Record<string, unknown>,
@@ -162,20 +172,76 @@ export class FaceR {
       }
     }
 
-    this.deformedPositions.set(this.cartridge.positions);
-    this.deformedNormals.set(this.cartridge.normals);
-    this.refreshAtlasTexture();
+    const topologyChanged =
+      this.deformedPositions.length !== this.cartridge.positions.length;
+
+    if (topologyChanged) {
+      (this as any).deformedPositions = new Float32Array(this.cartridge.positions);
+      (this as any).deformedNormals = new Float32Array(this.cartridge.normals);
+      if (this._gl) {
+        this.bindWebGL(this._gl);
+      }
+    } else {
+      this.deformedPositions.set(this.cartridge.positions);
+      this.deformedNormals.set(this.cartridge.normals);
+      this.refreshAtlasTexture();
+    }
+
     this.update(0);
     return this;
   }
 
   /**
    * Rebuild the anatomical rig (`positions`, `normals`, `pivots`, and FACS `muscles`)
-   * after modifying `cartridge.proportions` or `cartridge.sculptOffsets`.
+   * after modifying `cartridge.proportions`, `cartridge.appearance.hairStyle`, or `cartridge.sculptOffsets`.
    */
   public rebuildRig(recomputeMuscles = true): this {
     rebuildCartridgeRig(this.cartridge, recomputeMuscles);
     this.update(0);
+    return this;
+  }
+
+  /**
+   * Switch the active 3D haircut / headgear style (`'bald'`, `'buzz_fade'`, `'flattop'`,
+   * `'afro_short'`, `'mohawk'`, `'slick_back'`, `'dreadlocks'`, `'combat_helmet'`) on any head.
+   */
+  public setHairStyle(style: HaircutStyleName): this {
+    this.cartridge.appearance.hairStyle = style;
+    this.rebuildRig(false);
+    if (this._gl && this.mesh) {
+      this.refreshAtlasTexture();
+    }
+    return this;
+  }
+
+  /**
+   * Switch the underlying 3D Base Head Archetype (`'african_sculpt'`, `'european_scan'`,
+   * `'boggie_sculpt'`, `'walt_classic'`, `'east_asian'`, `'nordic_angular'`, `'gracile_feminine'`)
+   * non-destructively while preserving all macro proportion sliders, haircut, and appearance colors.
+   */
+  public setBaseHead(baseHead: BaseHeadId): this {
+    this.cartridge.appearance.baseHead = baseHead;
+    if ('_baseTopology' in (this.cartridge as any)) {
+      delete (this.cartridge as any)._baseTopology;
+    }
+    const canonical = getCanonicalBaseHead(baseHead);
+    const topologyChanged = this.cartridge.positions.length !== canonical.positions.length;
+    if (topologyChanged) {
+      this.cartridge.positions = new Float32Array(canonical.positions);
+      this.cartridge.normals = new Float32Array(canonical.normals);
+      this.cartridge.uvs = new Float32Array(canonical.uvs);
+      this.cartridge.indices = new Int32Array(canonical.indices);
+      this.cartridge.submeshes = canonical.submeshes.map(sm => ({ ...sm }));
+      this.cartridge.vertexRegionMap = new Uint8Array(canonical.vertexRegionMap);
+      this.cartridge.jawWeights = new Float32Array(canonical.jawWeights);
+      this.cartridge.sculptOffsets = new Float32Array(canonical.positions.length);
+      (this as any).deformedPositions = new Float32Array(canonical.positions.length);
+      (this as any).deformedNormals = new Float32Array(canonical.normals.length);
+    }
+    this.rebuildRig(true);
+    if (topologyChanged && this._gl) {
+      this.bindWebGL(this._gl);
+    }
     return this;
   }
 
@@ -275,19 +341,25 @@ export class FaceR {
    * progressive damage state (`0..4`) and refreshing the skin texture if changed.
    */
   public setHealth(healthPercent: number): this {
+    const wasDead = this._health <= 0;
     this._health = Utils.clamp(healthPercent, 0, 100);
     let tier = 0;
     if (this._health <= 0) {
       tier = 4;
       this.setExclusiveEmotion('dead', 1.0);
-    } else if (this._health < 20) {
-      tier = 4;
-    } else if (this._health < 40) {
-      tier = 3;
-    } else if (this._health < 60) {
-      tier = 2;
-    } else if (this._health < 80) {
-      tier = 1;
+    } else {
+      if (wasDead) {
+        this.setEmotion('dead', 0.0, true);
+      }
+      if (this._health < 20) {
+        tier = 4;
+      } else if (this._health < 40) {
+        tier = 3;
+      } else if (this._health < 60) {
+        tier = 2;
+      } else if (this._health < 80) {
+        tier = 1;
+      }
     }
     this.setDamageTier(tier);
     return this;
@@ -362,6 +434,39 @@ export class FaceR {
       this.pose.muscles[m] = this.compositor.currentMuscles[m];
     }
 
+    // 4b. Layer dynamic wounded facial grimace, swollen left-eye squint & labored panting when injured
+    this._traumaTime += dt;
+    if (this.pose.damageTier > 0 && this._health > 0 && this.autonomous) {
+      const tier = this.pose.damageTier;
+      const traumaIntensity = Math.max(
+        Utils.clamp((85 - this._health) / 85, 0, 1),
+        tier * 0.22
+      );
+      const m = this.pose.muscles;
+
+      // Swollen left eye squint & protective orbital wince
+      m.eyeSquintL = Utils.clamp(m.eyeSquintL + 0.16 * tier, 0, 1);
+      m.eyeBlinkL = Utils.clamp(m.eyeBlinkL + 0.11 * tier, 0, 1);
+      m.cheekSquintL = Utils.clamp(m.cheekSquintL + 0.14 * tier, 0, 1);
+      m.browDownL = Utils.clamp(m.browDownL + 0.12 * tier, 0, 1);
+      m.browInnerUp = Utils.clamp(m.browInnerUp + 0.14 * traumaIntensity, 0, 1);
+
+      if (tier >= 2) {
+        // Pain sneer & labored mouth-breathing wave
+        const breathFreq = 2.6 + traumaIntensity * 2.4;
+        const breathWave = 0.5 + 0.5 * Math.sin(this._traumaTime * breathFreq);
+        const pantAmount = (tier - 1) * 0.085 * (0.45 + 0.55 * breathWave);
+
+        m.noseSneerL = Utils.clamp(m.noseSneerL + 0.12 * (tier - 1), 0, 1);
+        m.mouthUpperUpL = Utils.clamp(m.mouthUpperUpL + 0.09 * (tier - 1), 0, 1);
+        m.mouthFrownL = Utils.clamp(m.mouthFrownL + 0.10 * (tier - 1), 0, 1);
+        m.mouthFrownR = Utils.clamp(m.mouthFrownR + 0.10 * (tier - 1), 0, 1);
+        m.jawOpen = Utils.clamp(m.jawOpen + pantAmount, 0, 1);
+        m.mouthLowerDownL = Utils.clamp(m.mouthLowerDownL + pantAmount * 0.75, 0, 1);
+        m.mouthLowerDownR = Utils.clamp(m.mouthLowerDownR + pantAmount * 0.75, 0, 1);
+      }
+    }
+
     this.pose.neckQuat.copy(this.gaze.neckQuat);
     this.pose.eyeLeftQuat.copy(this.gaze.eyeLeftQuat);
     this.pose.eyeRightQuat.copy(this.gaze.eyeRightQuat);
@@ -393,8 +498,13 @@ export class FaceR {
 }
 
 export {
+  BASE_HEAD_IDS,
+  BaseHeadId,
+  BASE_HEAD_ARCHETYPES,
   FACS_MUSCLE_NAMES,
   FacsMuscleName,
+  HAIRCUT_STYLES,
+  HaircutStyleName,
   FACE_REGIONS,
   FACE_REGION_IDS,
   FaceRegionName,
@@ -410,9 +520,12 @@ export {
   IImpulseEvent,
   Perlin1D,
   IBaseHeadTopology,
+  HAIR_CAP_VERTEX_COUNT,
   createBaseHeadTopology,
   getCanonicalBaseHead,
   computeSmoothNormals,
+  parseObjToTopology,
+  applyHaircutStyleToPositions,
   applyMacroProportions,
   computeFacsMuscles,
   createDefaultProportions,
@@ -420,6 +533,7 @@ export {
   createDefaultPersonality,
   createDefaultAppearance,
   createDefaultCartridge,
+  parseObjToCartridge,
   rebuildCartridgeRig,
   serializeCartridge,
   hydrateCartridge,

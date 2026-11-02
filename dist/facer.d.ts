@@ -81,13 +81,20 @@ interface IPersonalityProfile {
     asymmetryAmount: number;
     microJitterAmount: number;
 }
+declare const BASE_HEAD_IDS: readonly ["african_sculpt", "european_scan", "boggie_sculpt", "walt_classic", "east_asian", "nordic_angular", "gracile_feminine"];
+type BaseHeadId = (typeof BASE_HEAD_IDS)[number];
+declare const HAIRCUT_STYLES: readonly ["bald", "buzz_fade", "flattop", "afro_short", "mohawk", "slick_back", "dreadlocks", "combat_helmet"];
+type HaircutStyleName = (typeof HAIRCUT_STYLES)[number];
 interface IFaceAppearance {
+    baseHead?: BaseHeadId;
     skinColor: Vec3;
     skinShadowColor: Vec3;
     lipColor: Vec3;
     irisColor: Vec3;
     scleraColor: Vec3;
     browColor: Vec3;
+    hairColor: Vec3;
+    hairStyle: HaircutStyleName;
     teethColor: Vec3;
     damageSeed: number;
     customTierOverrides?: Record<number, number[]>;
@@ -142,6 +149,15 @@ declare class Perlin1D {
     fbmVec3(time: number, freq: Vec3, amp: Vec3, octaves?: number, target?: Vec3, baseChannel?: number): Vec3;
 }
 
+interface IBaseHeadArchetypeMeta {
+    id: BaseHeadId;
+    label: string;
+    subtitle: string;
+    skinPositions: Float32Array;
+}
+declare const BASE_HEAD_ARCHETYPES: Record<BaseHeadId, IBaseHeadArchetypeMeta>;
+
+declare const HAIR_CAP_VERTEX_COUNT: number;
 interface IBaseHeadGeometry {
     positions: Float32Array;
     normals: Float32Array;
@@ -155,13 +171,15 @@ interface IBaseHeadGeometry {
     triangleCount: number;
 }
 type IBaseHeadTopology = IBaseHeadGeometry;
-declare function buildAnatomicalBaseHead(segU?: number, segV?: number): IBaseHeadGeometry;
+declare function applyHaircutStyleToPositions(positions: Float32Array, submeshes: ISubmeshRange[], hairStyle?: HaircutStyleName): void;
+declare function buildAnatomicalBaseHead(_segU?: number, _segV?: number, baseHeadId?: BaseHeadId): IBaseHeadGeometry;
+declare function parseObjToTopology(objText: string): IBaseHeadGeometry;
 declare function computeSmoothNormals(positions: Float32Array, indices: Int32Array | Uint16Array | Uint32Array): Float32Array;
 declare const createBaseHeadTopology: typeof buildAnatomicalBaseHead;
-declare function getCanonicalBaseHead(): IBaseHeadGeometry;
+declare function getCanonicalBaseHead(baseHeadId?: BaseHeadId): IBaseHeadGeometry;
 
 declare function applyMacroProportions(baseHead: IBaseHeadTopology, proportions: IMacroProportions, sculptOffsets: Float32Array | null, outPositions: Float32Array, outPivots: IFacePivots): void;
-declare function computeFacsMuscles(positions: Float32Array, indices: Int32Array | Uint16Array | Uint32Array, vertexRegionMap: Uint8Array, pivots: IFacePivots): Record<FacsMuscleName, ISparseMuscleDelta>;
+declare function computeFacsMuscles(positions: Float32Array, indices: Int32Array | Uint16Array | Uint32Array, vertexRegionMap: Uint8Array, pivots: IFacePivots, jawWeights?: Float32Array): Record<FacsMuscleName, ISparseMuscleDelta>;
 
 declare function createDefaultProportions(): IMacroProportions;
 declare function createDefaultEmotions(): Record<string, IEmotionLayer>;
@@ -169,6 +187,7 @@ declare function createDefaultPersonality(): IPersonalityProfile;
 declare function createDefaultAppearance(): IFaceAppearance;
 declare function rebuildCartridgeRig(cartridge: IFaceCartridge, recomputeMuscles?: boolean): IFaceCartridge;
 declare function createDefaultCartridge(name?: string, id?: string): IFaceCartridge;
+declare function parseObjToCartridge(objText: string, name?: string, id?: string): IFaceCartridge;
 declare function serializeCartridge(cartridge: IFaceCartridge): Record<string, unknown>;
 declare function hydrateCartridge(raw: unknown): IFaceCartridge;
 
@@ -273,10 +292,13 @@ declare class FaceR {
     atlasSize: number;
     private _gl;
     private _health;
+    private _traumaTime;
     constructor(cartridge?: IFaceCartridge | Record<string, unknown>, options?: IFaceROptions);
     bindWebGL(gl: WebGLRenderingContext): Mesh;
     loadCartridge(cartridge: IFaceCartridge | Record<string, unknown>): this;
     rebuildRig(recomputeMuscles?: boolean): this;
+    setHairStyle(style: HaircutStyleName): this;
+    setBaseHead(baseHead: BaseHeadId): this;
     refreshAtlasTexture(): Uint8Array;
     setEmotion(name: string, weight: number, immediate?: boolean): this;
     setExclusiveEmotion(name: string, weight?: number, immediate?: boolean): this;
@@ -292,5 +314,5 @@ declare class FaceR {
     update(dt: number): IFacePoseState;
 }
 
-export { BlinkController, ExpressionCompositor, FACE_REGIONS, FACE_REGION_IDS, FACS_MUSCLE_NAMES, FaceR, GazeController, ImpulseController, Perlin1D, applyMacroProportions, computeFacsMuscles, computeSmoothNormals, createBaseHeadTopology, createDefaultAppearance, createDefaultCartridge, createDefaultEmotions, createDefaultPersonality, createDefaultProportions, createRoostrFaceMesh, evaluateFaceDeformation, generateFaceAtlasPixels, getCanonicalBaseHead, hydrateCartridge, rebuildCartridgeRig, rotateVec3ByQuat, serializeCartridge, syncRoostrMeshBuffers };
-export type { FaceRegionName, FacsMuscleName, IBaseHeadTopology, IEmotionLayer, IFaceAppearance, IFaceCartridge, IFacePivots, IFacePoseState, IFaceROptions, IImpulseEvent, IMacroProportions, IPersonalityProfile, ISparseMuscleDelta, ISubMeshRange };
+export { BASE_HEAD_ARCHETYPES, BASE_HEAD_IDS, BlinkController, ExpressionCompositor, FACE_REGIONS, FACE_REGION_IDS, FACS_MUSCLE_NAMES, FaceR, GazeController, HAIRCUT_STYLES, HAIR_CAP_VERTEX_COUNT, ImpulseController, Perlin1D, applyHaircutStyleToPositions, applyMacroProportions, computeFacsMuscles, computeSmoothNormals, createBaseHeadTopology, createDefaultAppearance, createDefaultCartridge, createDefaultEmotions, createDefaultPersonality, createDefaultProportions, createRoostrFaceMesh, evaluateFaceDeformation, generateFaceAtlasPixels, getCanonicalBaseHead, hydrateCartridge, parseObjToCartridge, parseObjToTopology, rebuildCartridgeRig, rotateVec3ByQuat, serializeCartridge, syncRoostrMeshBuffers };
+export type { BaseHeadId, FaceRegionName, FacsMuscleName, HaircutStyleName, IBaseHeadTopology, IEmotionLayer, IFaceAppearance, IFaceCartridge, IFacePivots, IFacePoseState, IFaceROptions, IImpulseEvent, IMacroProportions, IPersonalityProfile, ISparseMuscleDelta, ISubMeshRange };

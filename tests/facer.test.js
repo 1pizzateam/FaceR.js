@@ -1,10 +1,16 @@
 import {
   FaceR,
+  BASE_HEAD_IDS,
+  BASE_HEAD_ARCHETYPES,
   FACS_MUSCLE_NAMES,
+  HAIRCUT_STYLES,
+  HAIR_CAP_VERTEX_COUNT,
   FACE_REGIONS,
   Perlin1D,
   createBaseHeadTopology,
+  getCanonicalBaseHead,
   createDefaultCartridge,
+  parseObjToCartridge,
   serializeCartridge,
   hydrateCartridge,
   ExpressionCompositor,
@@ -72,6 +78,53 @@ describe('FaceR.js (@1pizzateam/facer)', () => {
         expect(delta.indices.length).toBeGreaterThan(5);
         expect(delta.dPos.length).toBe(delta.indices.length * 3);
         expect(delta.dNorm.length).toBe(delta.indices.length * 3);
+      }
+    });
+
+    test('parseObjToCartridge imports a Wavefront .obj mesh and auto-rigs FACS muscles', () => {
+      const sampleObj = [
+        'v -2.0 2.0 5.0',
+        'v 2.0 2.0 5.0',
+        'v 0.0 -2.0 6.0',
+        'v 0.0 -5.0 5.0',
+        'v -3.0 0.0 2.0',
+        'v 3.0 0.0 2.0',
+        'v 0.0 5.0 3.0',
+        'v 0.0 0.0 -4.0',
+        'f 1 3 2',
+        'f 3 4 2',
+        'f 1 4 3',
+        'f 1 2 7',
+        'f 5 1 7',
+        'f 2 6 7',
+        'f 5 8 6'
+      ].join('\n');
+      const imported = parseObjToCartridge(sampleObj, 'Custom OBJ Head', 'custom_obj');
+      expect(imported.name).toBe('Custom OBJ Head');
+      expect(imported.positions.length).toBe((8 + HAIR_CAP_VERTEX_COUNT) * 3);
+      expect(Object.keys(imported.muscles).length).toBe(FACS_MUSCLE_NAMES.length);
+
+      // Verify modular haircuts can be applied to both canonical and imported .OBJ heads
+      const face = new FaceR(imported);
+      for (const style of HAIRCUT_STYLES) {
+        face.setHairStyle(style);
+        expect(face.cartridge.appearance.hairStyle).toBe(style);
+      }
+    });
+
+    test('supports all 7 built-in Base Head Archetypes with distinct sculpt geometry and haircuts', () => {
+      expect(BASE_HEAD_IDS.length).toBe(7);
+      const face = new FaceR();
+      const canonicalCount = face.cartridge.positions.length;
+
+      for (const id of BASE_HEAD_IDS) {
+        expect(BASE_HEAD_ARCHETYPES[id]).toBeDefined();
+        const geom = getCanonicalBaseHead(id);
+        expect(geom.positions.length).toBe(canonicalCount);
+        face.setBaseHead(id);
+        expect(face.cartridge.appearance.baseHead).toBe(id);
+        face.setHairStyle('buzz_fade');
+        expect(face.cartridge.positions.length).toBe(canonicalCount);
       }
     });
   });

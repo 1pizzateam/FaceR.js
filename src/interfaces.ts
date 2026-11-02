@@ -139,15 +139,49 @@ export interface IPersonalityProfile {
 }
 
 /**
- * Procedural Skin, Eyes, Teeth, Brows & Progressive 5-Tier Damage Palette (`Vec3` RGB in `0..1`).
+ * 7 Built-in Anatomical Base Head Archetypes (sharing canonical 2,312-vertex topology).
+ */
+export const BASE_HEAD_IDS = [
+  'african_sculpt',
+  'european_scan',
+  'boggie_sculpt',
+  'walt_classic',
+  'east_asian',
+  'nordic_angular',
+  'gracile_feminine'
+] as const;
+
+export type BaseHeadId = (typeof BASE_HEAD_IDS)[number];
+
+/**
+ * 8 Modular 3D Haircut & Headgear Styles supported on any head topology.
+ */
+export const HAIRCUT_STYLES = [
+  'bald',
+  'buzz_fade',
+  'flattop',
+  'afro_short',
+  'mohawk',
+  'slick_back',
+  'dreadlocks',
+  'combat_helmet'
+] as const;
+
+export type HaircutStyleName = (typeof HAIRCUT_STYLES)[number];
+
+/**
+ * Procedural Skin, Eyes, Teeth, Brows, Hair & Progressive 5-Tier Damage Palette (`Vec3` RGB in `0..1`).
  */
 export interface IFaceAppearance {
+  baseHead?: BaseHeadId;
   skinColor: Vec3;
   skinShadowColor: Vec3;
   lipColor: Vec3;
   irisColor: Vec3;
   scleraColor: Vec3;
   browColor: Vec3;
+  hairColor: Vec3;
+  hairStyle: HaircutStyleName;
   teethColor: Vec3;
   damageSeed: number;
   customTierOverrides?: Record<number, number[]>;

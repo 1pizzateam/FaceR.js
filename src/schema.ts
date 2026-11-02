@@ -1,7 +1,11 @@
 import { Vec2, Vec3 } from '@1pizzateam/spock';
 import {
+  BASE_HEAD_IDS,
+  BaseHeadId,
   FACS_MUSCLE_NAMES,
   FacsMuscleName,
+  HAIRCUT_STYLES,
+  HaircutStyleName,
   IMacroProportions,
   IFacePivots,
   ISparseMuscleDelta,
@@ -10,7 +14,13 @@ import {
   IFaceAppearance,
   IFaceCartridge
 } from './interfaces';
-import { getCanonicalBaseHead, computeSmoothNormals } from './anatomy/baseHead';
+import {
+  getCanonicalBaseHead,
+  computeSmoothNormals,
+  parseObjToTopology,
+  applyHaircutStyleToPositions,
+  IBaseHeadGeometry
+} from './anatomy/baseHead';
 import { applyMacroProportions, computeFacsMuscles } from './anatomy/muscleTransfer';
 
 function toVec2(val: unknown, defX: number, defY: number): Vec2 {
@@ -221,27 +231,32 @@ export function createDefaultPersonality(): IPersonalityProfile {
  */
 export function createDefaultAppearance(): IFaceAppearance {
   return {
-    skinColor: new Vec3(0.86, 0.67, 0.54),
-    skinShadowColor: new Vec3(0.58, 0.38, 0.30),
-    lipColor: new Vec3(0.72, 0.42, 0.38),
-    irisColor: new Vec3(0.24, 0.46, 0.62),
-    scleraColor: new Vec3(0.95, 0.94, 0.92),
-    browColor: new Vec3(0.22, 0.15, 0.10),
-    teethColor: new Vec3(0.93, 0.91, 0.86),
+    baseHead: 'african_sculpt',
+    skinColor: new Vec3(0.38, 0.23, 0.15),
+    skinShadowColor: new Vec3(0.18, 0.10, 0.06),
+    lipColor: new Vec3(0.34, 0.17, 0.15),
+    irisColor: new Vec3(0.22, 0.13, 0.07),
+    scleraColor: new Vec3(0.95, 0.93, 0.90),
+    browColor: new Vec3(0.08, 0.05, 0.04),
+    hairColor: new Vec3(0.07, 0.05, 0.04),
+    hairStyle: 'bald',
+    teethColor: new Vec3(0.94, 0.92, 0.88),
     damageSeed: 1337
   };
 }
 
 /**
  * Rebuild derived topology buffers (`positions`, `normals`, `pivots`, and optionally
- * the FACS `muscles`) on an `IFaceCartridge` after macro proportions or freeform
+ * the FACS `muscles`) on an `IFaceCartridge` after macro proportions, `baseHead`, `hairStyle`, or freeform
  * `sculptOffsets` have been modified.
  */
 export function rebuildCartridgeRig(
   cartridge: IFaceCartridge,
   recomputeMuscles = true
 ): IFaceCartridge {
-  const baseHead = getCanonicalBaseHead();
+  const baseHead: IBaseHeadGeometry =
+    ((cartridge as any)._baseTopology as IBaseHeadGeometry | undefined) ??
+    getCanonicalBaseHead(cartridge.appearance?.baseHead ?? 'african_sculpt');
 
   if (!cartridge.sculptOffsets || cartridge.sculptOffsets.length !== baseHead.positions.length) {
     cartridge.sculptOffsets = new Float32Array(baseHead.positions.length);
@@ -258,6 +273,12 @@ export function rebuildCartridgeRig(
     cartridge.pivots
   );
 
+  applyHaircutStyleToPositions(
+    cartridge.positions,
+    cartridge.submeshes,
+    cartridge.appearance?.hairStyle ?? 'bald'
+  );
+
   cartridge.normals = computeSmoothNormals(cartridge.positions, cartridge.indices);
 
   if (recomputeMuscles) {
@@ -265,7 +286,8 @@ export function rebuildCartridgeRig(
       cartridge.positions,
       cartridge.indices,
       cartridge.vertexRegionMap,
-      cartridge.pivots
+      cartridge.pivots,
+      cartridge.jawWeights
     );
   }
 
@@ -283,6 +305,7 @@ export function createDefaultCartridge(
 ): IFaceCartridge {
   const baseHead = getCanonicalBaseHead();
   const proportions = createDefaultProportions();
+  const appearance = createDefaultAppearance();
   const sculptOffsets = new Float32Array(baseHead.positions.length);
   const positions = new Float32Array(baseHead.positions.length);
   const pivots: IFacePivots = {
@@ -293,12 +316,14 @@ export function createDefaultCartridge(
   };
 
   applyMacroProportions(baseHead, proportions, sculptOffsets, positions, pivots);
+  applyHaircutStyleToPositions(positions, baseHead.submeshes, appearance.hairStyle);
   const normals = computeSmoothNormals(positions, baseHead.indices);
   const muscles = computeFacsMuscles(
     positions,
     baseHead.indices,
     baseHead.vertexRegionMap,
-    pivots
+    pivots,
+    baseHead.jawWeights
   );
 
   return {
@@ -318,8 +343,71 @@ export function createDefaultCartridge(
     muscles,
     emotions: createDefaultEmotions(),
     personality: createDefaultPersonality(),
-    appearance: createDefaultAppearance()
+    appearance
   };
+}
+
+/**
+ * Parse a Wavefront `.obj` 3D head mesh string and automatically rig it into a
+ * ready-to-animate `IFaceCartridge` with 32 FACS muscles, jaw weights, and
+ * Ken Perlin personality parameters.
+ */
+export function parseObjToCartridge(
+  objText: string,
+  name = 'Imported .OBJ Head',
+  id = 'imported_obj_head'
+): IFaceCartridge {
+  const baseHead = parseObjToTopology(objText);
+  const proportions = createDefaultProportions();
+  const appearance = createDefaultAppearance();
+  const sculptOffsets = new Float32Array(baseHead.positions.length);
+  const positions = new Float32Array(baseHead.positions.length);
+  const pivots: IFacePivots = {
+    neck: new Vec3().copy(baseHead.pivots.neck),
+    jaw: new Vec3().copy(baseHead.pivots.jaw),
+    eyeLeft: new Vec3().copy(baseHead.pivots.eyeLeft),
+    eyeRight: new Vec3().copy(baseHead.pivots.eyeRight)
+  };
+
+  applyMacroProportions(baseHead, proportions, sculptOffsets, positions, pivots);
+  applyHaircutStyleToPositions(positions, baseHead.submeshes, appearance.hairStyle);
+  const normals = computeSmoothNormals(positions, baseHead.indices);
+  const muscles = computeFacsMuscles(
+    positions,
+    baseHead.indices,
+    baseHead.vertexRegionMap,
+    pivots,
+    baseHead.jawWeights
+  );
+
+  const cartridge: IFaceCartridge = {
+    version: '1.0',
+    id,
+    name,
+    proportions,
+    sculptOffsets,
+    positions,
+    normals,
+    uvs: new Float32Array(baseHead.uvs),
+    indices: new Int32Array(baseHead.indices),
+    submeshes: baseHead.submeshes.map(sm => ({ ...sm })),
+    vertexRegionMap: new Uint8Array(baseHead.vertexRegionMap),
+    jawWeights: new Float32Array(baseHead.jawWeights),
+    pivots,
+    muscles,
+    emotions: createDefaultEmotions(),
+    personality: createDefaultPersonality(),
+    appearance
+  };
+
+  Object.defineProperty(cartridge, '_baseTopology', {
+    value: baseHead,
+    enumerable: false,
+    writable: true,
+    configurable: true
+  });
+
+  return cartridge;
 }
 
 function roundNumber(n: number): number {
@@ -414,12 +502,15 @@ export function serializeCartridge(cartridge: IFaceCartridge): Record<string, un
       microJitterAmount: cartridge.personality.microJitterAmount
     },
     appearance: {
+      baseHead: cartridge.appearance.baseHead ?? 'african_sculpt',
       skinColor: vec3ToArray(cartridge.appearance.skinColor),
       skinShadowColor: vec3ToArray(cartridge.appearance.skinShadowColor),
       lipColor: vec3ToArray(cartridge.appearance.lipColor),
       irisColor: vec3ToArray(cartridge.appearance.irisColor),
       scleraColor: vec3ToArray(cartridge.appearance.scleraColor),
       browColor: vec3ToArray(cartridge.appearance.browColor),
+      hairColor: vec3ToArray(cartridge.appearance.hairColor ?? cartridge.appearance.browColor),
+      hairStyle: cartridge.appearance.hairStyle ?? 'bald',
       teethColor: vec3ToArray(cartridge.appearance.teethColor),
       damageSeed: cartridge.appearance.damageSeed,
       customTierOverrides: cartridge.appearance.customTierOverrides
@@ -436,9 +527,46 @@ export function serializeCartridge(cartridge: IFaceCartridge): Record<string, un
  */
 export function hydrateCartridge(raw: unknown): IFaceCartridge {
   const obj = (raw && typeof raw === 'object' ? raw : {}) as Record<string, any>;
-  const baseHead = getCanonicalBaseHead();
   const defProps = createDefaultProportions();
   const rawProps = obj.proportions || {};
+
+  const defApp = createDefaultAppearance();
+  const rawApp = obj.appearance || {};
+  const rawBaseHead = rawApp.baseHead ?? obj.baseHead;
+  const baseHeadId: BaseHeadId =
+    typeof rawBaseHead === 'string' && (BASE_HEAD_IDS as readonly string[]).includes(rawBaseHead)
+      ? (rawBaseHead as BaseHeadId)
+      : (defApp.baseHead ?? 'african_sculpt');
+  const baseHead = getCanonicalBaseHead(baseHeadId);
+
+  const rawHairStyle = rawApp.hairStyle;
+  const hairStyle: HaircutStyleName =
+    typeof rawHairStyle === 'string' && (HAIRCUT_STYLES as readonly string[]).includes(rawHairStyle)
+      ? (rawHairStyle as HaircutStyleName)
+      : defApp.hairStyle;
+
+  const appearance: IFaceAppearance = {
+    baseHead: baseHeadId,
+    skinColor: toVec3(rawApp.skinColor, defApp.skinColor.x, defApp.skinColor.y, defApp.skinColor.z),
+    skinShadowColor: toVec3(rawApp.skinShadowColor, defApp.skinShadowColor.x, defApp.skinShadowColor.y, defApp.skinShadowColor.z),
+    lipColor: toVec3(rawApp.lipColor, defApp.lipColor.x, defApp.lipColor.y, defApp.lipColor.z),
+    irisColor: toVec3(rawApp.irisColor, defApp.irisColor.x, defApp.irisColor.y, defApp.irisColor.z),
+    scleraColor: toVec3(rawApp.scleraColor, defApp.scleraColor.x, defApp.scleraColor.y, defApp.scleraColor.z),
+    browColor: toVec3(rawApp.browColor, defApp.browColor.x, defApp.browColor.y, defApp.browColor.z),
+    hairColor: toVec3(
+      rawApp.hairColor ?? rawApp.browColor,
+      defApp.hairColor.x,
+      defApp.hairColor.y,
+      defApp.hairColor.z
+    ),
+    hairStyle,
+    teethColor: toVec3(rawApp.teethColor, defApp.teethColor.x, defApp.teethColor.y, defApp.teethColor.z),
+    damageSeed: typeof rawApp.damageSeed === 'number' ? rawApp.damageSeed : defApp.damageSeed,
+    customTierOverrides:
+      rawApp.customTierOverrides && typeof rawApp.customTierOverrides === 'object'
+        ? { ...rawApp.customTierOverrides }
+        : undefined
+  };
 
   const proportions: IMacroProportions = {
     craniumScale: toVec3(rawProps.craniumScale, defProps.craniumScale.x, defProps.craniumScale.y, defProps.craniumScale.z),
@@ -478,6 +606,7 @@ export function hydrateCartridge(raw: unknown): IFaceCartridge {
   };
 
   applyMacroProportions(baseHead, proportions, sculptOffsets, positions, pivots);
+  applyHaircutStyleToPositions(positions, baseHead.submeshes, appearance.hairStyle);
 
   if (obj.pivots) {
     if (obj.pivots.neck) pivots.neck = toVec3(obj.pivots.neck, pivots.neck.x, pivots.neck.y, pivots.neck.z);
@@ -509,7 +638,13 @@ export function hydrateCartridge(raw: unknown): IFaceCartridge {
       muscles[m] = { indices, dPos, dNorm };
     }
   } else {
-    muscles = computeFacsMuscles(positions, baseHead.indices, baseHead.vertexRegionMap, pivots);
+    muscles = computeFacsMuscles(
+      positions,
+      baseHead.indices,
+      baseHead.vertexRegionMap,
+      pivots,
+      baseHead.jawWeights
+    );
   }
 
   const defEmotions = createDefaultEmotions();
@@ -538,23 +673,6 @@ export function hydrateCartridge(raw: unknown): IFaceCartridge {
     eyeDamping: typeof rawPers.eyeDamping === 'number' ? rawPers.eyeDamping : defPers.eyeDamping,
     asymmetryAmount: typeof rawPers.asymmetryAmount === 'number' ? rawPers.asymmetryAmount : defPers.asymmetryAmount,
     microJitterAmount: typeof rawPers.microJitterAmount === 'number' ? rawPers.microJitterAmount : defPers.microJitterAmount
-  };
-
-  const defApp = createDefaultAppearance();
-  const rawApp = obj.appearance || {};
-  const appearance: IFaceAppearance = {
-    skinColor: toVec3(rawApp.skinColor, defApp.skinColor.x, defApp.skinColor.y, defApp.skinColor.z),
-    skinShadowColor: toVec3(rawApp.skinShadowColor, defApp.skinShadowColor.x, defApp.skinShadowColor.y, defApp.skinShadowColor.z),
-    lipColor: toVec3(rawApp.lipColor, defApp.lipColor.x, defApp.lipColor.y, defApp.lipColor.z),
-    irisColor: toVec3(rawApp.irisColor, defApp.irisColor.x, defApp.irisColor.y, defApp.irisColor.z),
-    scleraColor: toVec3(rawApp.scleraColor, defApp.scleraColor.x, defApp.scleraColor.y, defApp.scleraColor.z),
-    browColor: toVec3(rawApp.browColor, defApp.browColor.x, defApp.browColor.y, defApp.browColor.z),
-    teethColor: toVec3(rawApp.teethColor, defApp.teethColor.x, defApp.teethColor.y, defApp.teethColor.z),
-    damageSeed: typeof rawApp.damageSeed === 'number' ? rawApp.damageSeed : defApp.damageSeed,
-    customTierOverrides:
-      rawApp.customTierOverrides && typeof rawApp.customTierOverrides === 'object'
-        ? { ...rawApp.customTierOverrides }
-        : undefined
   };
 
   return {
