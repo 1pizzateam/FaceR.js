@@ -35,6 +35,28 @@ function symmetricFalloff(pos: Vec3, center: Vec3, radii: Vec3): number {
 }
 
 /**
+ * Compute the UV-invariant eyelid opening / eyelash weight `[0, 1]` for a `skin` vertex `(u, v)`.
+ * Maintains a flat `1.0` plateau across the eyelid opening, upper eyelid tarsal plate, supra-tarsal
+ * crease, and painted eyelashes (`yHead <= 2.385`) while staying strictly zero on the nose bridge and eyebrow bed.
+ */
+function computeUvEyeHoleWeight(u: number, v: number): number {
+  if (v >= 0.74) return 0;
+  const uGrid = (u - 0.5) / 0.48;
+  const absU = Math.abs(uGrid);
+  const sv = Utils.clamp((0.74 - v) / 0.72, 0.0, 1.0);
+  const yHead = -11.0 + sv * 21.5;
+
+  const wMedial = Utils.smoothstep(0.048, 0.058, absU);
+  const wLateral = Utils.smoothstep(0.200, 0.178, absU);
+  const wBrow = Utils.smoothstep(2.445, 2.385, yHead);
+  const wLower = Utils.smoothstep(1.12, 1.48, yHead);
+  const du = (absU - 0.116) / 0.078;
+  const dy = (yHead - 1.95) / 0.78;
+  const wEllipse = Utils.smoothstep(1.25, 0.82, Math.hypot(du, dy));
+  return wMedial * wLateral * wBrow * wLower * wEllipse;
+}
+
+/**
  * Apply macro anatomical proportions (`IMacroProportions`, all `Vec3`) plus
  * optional freeform sculpt offsets (`Float32Array`) to the canonical base head
  * topology, writing deformed positions into `outPositions` and updated pivot
@@ -48,26 +70,14 @@ export function applyMacroProportions(
   outPivots: IFacePivots
 ): void {
   const srcPos = baseHead.positions;
+  const uvs = baseHead.uvs;
   const regionMap = baseHead.vertexRegionMap;
   const vertexCount = baseHead.vertexCount;
 
   const basePivots = baseHead.pivots;
-  outPivots.neck.copy(basePivots.neck);
-  outPivots.jaw.setScalar(
-    basePivots.jaw.x,
-    basePivots.jaw.y * proportions.jawScale.y,
-    basePivots.jaw.z * proportions.jawScale.z
-  );
-  outPivots.eyeLeft.setScalar(
-    basePivots.eyeLeft.x - proportions.eyeSocketOffset.x,
-    basePivots.eyeLeft.y + proportions.eyeSocketOffset.y,
-    basePivots.eyeLeft.z + proportions.eyeSocketOffset.z
-  );
-  outPivots.eyeRight.setScalar(
-    basePivots.eyeRight.x + proportions.eyeSocketOffset.x,
-    basePivots.eyeRight.y + proportions.eyeSocketOffset.y,
-    basePivots.eyeRight.z + proportions.eyeSocketOffset.z
-  );
+  const eyeAbsX = 2.1;
+  const eyeY = 1.864;
+  const eyeSurfaceZ = 5.25;
 
   const p = new Vec3();
   const cJaw = new Vec3(4.1, -3.2, 2.2);
@@ -76,16 +86,40 @@ export function applyMacroProportions(
   const rChin = new Vec3(2.6, 1.9, 3.2);
   const cCheek = new Vec3(3.6, 0.45, 4.8);
   const rCheek = new Vec3(2.6, 2.3, 3.4);
-  const cBrow = new Vec3(1.95, 2.85, 5.6);
+  const cBrow = new Vec3(eyeAbsX, 2.85, 5.6);
   const rBrow = new Vec3(3.0, 1.4, 3.0);
-  const cEye = new Vec3(1.95, 1.86, 5.1);
-  const rEye = new Vec3(2.0, 1.5, 3.0);
+  const cEye = new Vec3(eyeAbsX, eyeY, 5.1);
+  const rEye = new Vec3(1.35, 0.65, 2.2);
   const cNose = new Vec3(0, -0.25, 7.0);
   const rNose = new Vec3(1.8, 2.3, 3.2);
   const cMouth = new Vec3(0, -2.25, 6.3);
   const rMouth = new Vec3(2.8, 1.7, 3.0);
   const cEar = new Vec3(5.88, 1.05, -1.5);
   const rEar = new Vec3(1.9, 2.7, 2.4);
+
+  p.setScalar(eyeAbsX, eyeY, eyeSurfaceZ);
+  const wEyeCheek = symmetricFalloff(p, cCheek, rCheek);
+  const wEyeBrow = symmetricFalloff(p, cBrow, rBrow);
+  const eyeDx = proportions.eyeSocketOffset.x + wEyeCheek * proportions.cheekboneOffset.x + wEyeBrow * proportions.browOffset.x;
+  const eyeDy = proportions.eyeSocketOffset.y;
+  const eyeDz = proportions.eyeSocketOffset.z + wEyeCheek * proportions.cheekboneOffset.z + wEyeBrow * proportions.browOffset.z;
+
+  outPivots.neck.copy(basePivots.neck);
+  outPivots.jaw.setScalar(
+    basePivots.jaw.x,
+    basePivots.jaw.y * proportions.jawScale.y,
+    basePivots.jaw.z * proportions.jawScale.z
+  );
+  outPivots.eyeLeft.setScalar(
+    basePivots.eyeLeft.x - eyeDx,
+    basePivots.eyeLeft.y + eyeDy,
+    basePivots.eyeLeft.z + eyeDz
+  );
+  outPivots.eyeRight.setScalar(
+    basePivots.eyeRight.x + eyeDx,
+    basePivots.eyeRight.y + eyeDy,
+    basePivots.eyeRight.z + eyeDz
+  );
 
   const smBrows = baseHead.submeshes.find(sm => sm.name === 'browsHair');
   const hairStartVertex =
@@ -100,13 +134,13 @@ export function applyMacroProportions(
     const signX = p.x >= 0 ? 1 : -1;
 
     if (region === FACE_REGION_IDS.eyeLeft) {
-      p.x -= proportions.eyeSocketOffset.x;
-      p.y += proportions.eyeSocketOffset.y;
-      p.z += proportions.eyeSocketOffset.z;
+      p.x -= eyeDx;
+      p.y += eyeDy;
+      p.z += eyeDz;
     } else if (region === FACE_REGION_IDS.eyeRight) {
-      p.x += proportions.eyeSocketOffset.x;
-      p.y += proportions.eyeSocketOffset.y;
-      p.z += proportions.eyeSocketOffset.z;
+      p.x += eyeDx;
+      p.y += eyeDy;
+      p.z += eyeDz;
     } else if (region === FACE_REGION_IDS.browsHair && i < hairStartVertex) {
       const upperMask = Utils.smoothstep(2.1, 4.5, p.y);
       p.x *= Utils.lerp(1.0, proportions.craniumScale.x, upperMask);
@@ -119,13 +153,6 @@ export function applyMacroProportions(
       p.x += signX * proportions.browOffset.x * wBrow;
       p.y += proportions.browOffset.y * wBrow;
       p.z += proportions.browOffset.z * wBrow;
-
-      const wEye = symmetricFalloff(p, cEye, rEye);
-      if (wEye > 0) {
-        p.x += signX * proportions.eyeSocketOffset.x * wEye;
-        p.y += proportions.eyeSocketOffset.y * wEye;
-        p.z += proportions.eyeSocketOffset.z * wEye;
-      }
     } else if (region === FACE_REGION_IDS.browsHair && i >= hairStartVertex) {
       const upperMask = Utils.smoothstep(2.1, 4.5, p.y);
       const lowerMask = Utils.smoothstep(1.0, -2.5, p.y) * Utils.smoothstep(-5.8, -4.4, p.y);
@@ -154,13 +181,6 @@ export function applyMacroProportions(
         p.x += signX * proportions.browOffset.x * wBrow;
         p.y += proportions.browOffset.y * wBrow;
         p.z += proportions.browOffset.z * wBrow;
-      }
-
-      const wEye = symmetricFalloff(p, cEye, rEye);
-      if (wEye > 0) {
-        p.x += signX * proportions.eyeSocketOffset.x * wEye;
-        p.y += proportions.eyeSocketOffset.y * wEye;
-        p.z += proportions.eyeSocketOffset.z * wEye;
       }
 
       const wEar = symmetricFalloff(p, cEar, rEar);
@@ -214,7 +234,14 @@ export function applyMacroProportions(
         p.z += proportions.browOffset.z * wBrow;
       }
 
-      const wEye = symmetricFalloff(p, cEye, rEye);
+      const absX = Math.abs(p.x);
+      const wEye3d =
+        symmetricFalloff(p, cEye, rEye) *
+        Utils.smoothstep(0.92, 1.32, absX) *
+        Utils.smoothstep(2.44, 2.28, p.y) *
+        Utils.smoothstep(1.12, 1.48, p.y);
+      const wEyeUv = uvs ? computeUvEyeHoleWeight(uvs[i * 2], uvs[i * 2 + 1]) : 0;
+      const wEye = Math.max(wEye3d, wEyeUv);
       if (wEye > 0) {
         p.x += signX * proportions.eyeSocketOffset.x * wEye;
         p.y += proportions.eyeSocketOffset.y * wEye;
@@ -278,7 +305,7 @@ function evaluateSingleMuscleDisplacement(
   }
 
   if (region === FACE_REGION_IDS.teethLower || region === FACE_REGION_IDS.mouthInner) {
-    if (region === FACE_REGION_IDS.mouthInner && pos.y > -2.25) {
+    if (region === FACE_REGION_IDS.mouthInner && jawW < 0.4) {
       return;
     }
     switch (muscleName) {

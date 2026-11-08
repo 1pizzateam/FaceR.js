@@ -139,41 +139,21 @@ export interface IPersonalityProfile {
 }
 
 /**
- * 7 Built-in Anatomical Base Head Archetypes (sharing canonical 2,312-vertex topology).
+ * A base head id: any head registered with `registerBaseHead` (FaceR ships none).
  */
-export const BASE_HEAD_IDS = [
-  'african_sculpt',
-  'european_scan',
-  'boggie_sculpt',
-  'walt_classic',
-  'east_asian',
-  'nordic_angular',
-  'gracile_feminine'
-] as const;
-
-export type BaseHeadId = (typeof BASE_HEAD_IDS)[number];
+export type BaseHeadId = string;
 
 /**
- * 8 Modular 3D Haircut & Headgear Styles supported on any head topology.
+ * A hair style id: `'bald'` (no hair, built in) or a style registered with `registerHairStyle` (FaceR ships none).
  */
-export const HAIRCUT_STYLES = [
-  'bald',
-  'buzz_fade',
-  'flattop',
-  'afro_short',
-  'mohawk',
-  'slick_back',
-  'dreadlocks',
-  'combat_helmet'
-] as const;
-
-export type HaircutStyleName = (typeof HAIRCUT_STYLES)[number];
+export type HaircutStyleName = string;
 
 /**
  * Procedural Skin, Eyes, Teeth, Brows, Hair & Progressive 5-Tier Damage Palette (`Vec3` RGB in `0..1`).
  */
 export interface IFaceAppearance {
-  baseHead?: BaseHeadId;
+  /** Id of a base head registered with `registerBaseHead` . */
+  baseHead?: string;
   skinColor: Vec3;
   skinShadowColor: Vec3;
   lipColor: Vec3;
@@ -222,7 +202,8 @@ export interface IFacePoseState {
   damageTier: number;
 }
 
-export type ImpulseType = 'pain' | 'shoot' | 'surprise' | 'glance' | 'evilGrin';
+/** An impulse type: a name from the face profile's `impulses` (for example `pain`, `shoot`). Unknown types are ignored. */
+export type ImpulseType = string;
 
 /**
  * Transient Reactive Gameplay Impulse Event.

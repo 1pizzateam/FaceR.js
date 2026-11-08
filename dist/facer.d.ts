@@ -24,7 +24,7 @@ SOFTWARE.
 https://github.com/1pizzateam/FaceR.js
 */
 
-import { Vec2, Vec3, Quat } from '@1pizzateam/spock';
+import { Vec3, Vec2, Quat } from '@1pizzateam/spock';
 export { Accumulator, Bezier, Box, Frustum, Mat3, Mat4, Mat4x3, Plane, Quat, Rand, Ray2, Ray3, Sphere, Time, Trigo, Utils, Vec2, Vec3 } from '@1pizzateam/spock';
 import { CustomMesh, Mesh } from '@1pizzateam/roostr';
 
@@ -81,12 +81,10 @@ interface IPersonalityProfile {
     asymmetryAmount: number;
     microJitterAmount: number;
 }
-declare const BASE_HEAD_IDS: readonly ["african_sculpt", "european_scan", "boggie_sculpt", "walt_classic", "east_asian", "nordic_angular", "gracile_feminine"];
-type BaseHeadId = (typeof BASE_HEAD_IDS)[number];
-declare const HAIRCUT_STYLES: readonly ["bald", "buzz_fade", "flattop", "afro_short", "mohawk", "slick_back", "dreadlocks", "combat_helmet"];
-type HaircutStyleName = (typeof HAIRCUT_STYLES)[number];
+type BaseHeadId = string;
+type HaircutStyleName = string;
 interface IFaceAppearance {
-    baseHead?: BaseHeadId;
+    baseHead?: string;
     skinColor: Vec3;
     skinShadowColor: Vec3;
     lipColor: Vec3;
@@ -126,7 +124,7 @@ interface IFacePoseState {
     eyeRightQuat: Quat;
     damageTier: number;
 }
-type ImpulseType = 'pain' | 'shoot' | 'surprise' | 'glance' | 'evilGrin';
+type ImpulseType = string;
 interface IImpulseEvent {
     type: ImpulseType;
     intensity: number;
@@ -149,14 +147,6 @@ declare class Perlin1D {
     fbmVec3(time: number, freq: Vec3, amp: Vec3, octaves?: number, target?: Vec3, baseChannel?: number): Vec3;
 }
 
-interface IBaseHeadArchetypeMeta {
-    id: BaseHeadId;
-    label: string;
-    subtitle: string;
-    skinPositions: Float32Array;
-}
-declare const BASE_HEAD_ARCHETYPES: Record<BaseHeadId, IBaseHeadArchetypeMeta>;
-
 declare const HAIR_CAP_VERTEX_COUNT: number;
 interface IBaseHeadGeometry {
     positions: Float32Array;
@@ -167,16 +157,121 @@ interface IBaseHeadGeometry {
     vertexRegionMap: Uint8Array;
     jawWeights: Float32Array;
     pivots: IFacePivots;
+    eyeballPlacement?: {
+        offset: Vec3;
+        scale: number;
+    };
+    eyeHolePlacement?: {
+        offset: Vec3;
+        scale: Vec2;
+    };
+    teethPlacement?: {
+        offset: Vec3;
+        scale: number;
+        gap: number;
+    };
     vertexCount: number;
     triangleCount: number;
 }
 type IBaseHeadTopology = IBaseHeadGeometry;
+interface IHairStyle {
+    id: string;
+    capDelta: Float32Array;
+    atlas: {
+        size: number;
+        shade: Uint8Array;
+        skinMix: Uint8Array;
+    };
+}
+declare function registerHairStyle(style: IHairStyle): void;
+declare function hasHairStyle(id: string): boolean;
+declare function getHairStyle(id: string): IHairStyle | undefined;
+declare function deserializeHairStyle(data: unknown): IHairStyle;
+declare function loadHairStyle(id: string, urlOrBase: string): Promise<IHairStyle>;
 declare function applyHaircutStyleToPositions(positions: Float32Array, submeshes: ISubmeshRange[], hairStyle?: HaircutStyleName): void;
-declare function buildAnatomicalBaseHead(_segU?: number, _segV?: number, baseHeadId?: BaseHeadId): IBaseHeadGeometry;
 declare function parseObjToTopology(objText: string): IBaseHeadGeometry;
 declare function computeSmoothNormals(positions: Float32Array, indices: Int32Array | Uint16Array | Uint32Array): Float32Array;
-declare const createBaseHeadTopology: typeof buildAnatomicalBaseHead;
-declare function getCanonicalBaseHead(baseHeadId?: BaseHeadId): IBaseHeadGeometry;
+declare function registerBaseHead(id: string, geometry: IBaseHeadGeometry): void;
+declare function hasBaseHead(id: string): boolean;
+declare function getCanonicalBaseHead(baseHeadId: string): IBaseHeadGeometry;
+declare function deserializeBaseHead(data: unknown): IBaseHeadGeometry;
+declare function loadBaseHead(id: string, urlOrBase: string): Promise<IBaseHeadGeometry>;
+
+interface IFaceProfile {
+    id: string;
+    defaultBaseHead?: string;
+    emotions: Record<string, IEmotionLayer>;
+    appearance?: Partial<IFaceAppearance>;
+    personality?: IPersonalityProfile;
+    material?: {
+        ambient: Vec3;
+        diffuse: Vec3;
+        specular: Vec3;
+        shininess: number;
+    };
+    damage?: IDamageProfile;
+    impulses: Record<string, IImpulseRecipe>;
+    holdShooting: {
+        riseRate: number;
+        fallRate: number;
+    };
+}
+interface IDamageZone {
+    id: string;
+    center: Vec3;
+    radii: Vec3;
+    minTier: number;
+    tierBase: number;
+    weight: number;
+    normal: [number, number, number];
+    constant: [number, number, number];
+}
+interface IDamageMuscle {
+    muscle: FacsMuscleName;
+    minTier: number;
+    tierBase: number;
+    perTier: number;
+    intensity: number;
+    pant: number;
+}
+interface IDamageProfile {
+    tierHealthThresholds: number[];
+    minZ: number;
+    zones: IDamageZone[];
+    reaction: {
+        intensityHealthRef: number;
+        intensityPerTier: number;
+        pant: {
+            minTier: number;
+            perTier: number;
+            tierBase: number;
+            floor: number;
+            freqBase: number;
+            freqIntensity: number;
+        } | null;
+        muscles: IDamageMuscle[];
+    };
+}
+interface IImpulseRecipe {
+    duration: number;
+    attack: number;
+    muscles: [FacsMuscleName, number][];
+    headEuler: [number, number, number] | null;
+    headEulerDirX: [number, number, number] | null;
+    directionalMuscles: {
+        muscle: FacsMuscleName;
+        whenXNegative: number;
+        otherwise: number;
+    }[];
+    gazeFromDir: {
+        maxX: number;
+        maxY: number;
+    } | null;
+}
+declare function registerFaceProfile(profile: IFaceProfile | null): void;
+declare function getFaceProfile(): IFaceProfile | null;
+declare function deserializeFaceProfile(data: unknown): IFaceProfile;
+declare function loadFaceProfile(url: string): Promise<IFaceProfile>;
 
 declare function applyMacroProportions(baseHead: IBaseHeadTopology, proportions: IMacroProportions, sculptOffsets: Float32Array | null, outPositions: Float32Array, outPivots: IFacePivots): void;
 declare function computeFacsMuscles(positions: Float32Array, indices: Int32Array | Uint16Array | Uint32Array, vertexRegionMap: Uint8Array, pivots: IFacePivots, jawWeights?: Float32Array): Record<FacsMuscleName, ISparseMuscleDelta>;
@@ -186,7 +281,7 @@ declare function createDefaultEmotions(): Record<string, IEmotionLayer>;
 declare function createDefaultPersonality(): IPersonalityProfile;
 declare function createDefaultAppearance(): IFaceAppearance;
 declare function rebuildCartridgeRig(cartridge: IFaceCartridge, recomputeMuscles?: boolean): IFaceCartridge;
-declare function createDefaultCartridge(name?: string, id?: string): IFaceCartridge;
+declare function createDefaultCartridge(name?: string, id?: string, baseHeadId?: string): IFaceCartridge;
 declare function parseObjToCartridge(objText: string, name?: string, id?: string): IFaceCartridge;
 declare function serializeCartridge(cartridge: IFaceCartridge): Record<string, unknown>;
 declare function hydrateCartridge(raw: unknown): IFaceCartridge;
@@ -232,6 +327,7 @@ declare class GazeController {
     setGazeAngles(angles: Vec2): void;
     lookAt(target: Vec3, headOrigin?: Vec3): void;
     update(dt: number, personality: IPersonalityProfile, extraHeadEulerOffset?: Vec3, impulseGazeOffset?: Vec2): void;
+    applyHeadEuler(extraHeadEulerOffset?: Vec3): void;
 }
 
 declare class BlinkController {
@@ -256,13 +352,21 @@ declare class ImpulseController {
     readonly outputMuscles: Partial<Record<FacsMuscleName, number>>;
     readonly outputHeadEuler: Vec3;
     readonly outputGazeOffset: Vec2;
+    private _shooting;
+    private _shootHold;
+    setShooting(on: boolean): void;
+    isShooting(): boolean;
+    private _accumulateRecipe;
     triggerImpulse(type: IImpulseEvent['type'], intensity?: number, direction?: Vec3, duration?: number): void;
     private _accumulateMuscle;
     update(dt: number): void;
 }
 
 declare function rotateVec3ByQuat(v: Vec3, q: Quat): Vec3;
+declare function invalidateDeformCache(cartridge: IFaceCartridge): void;
 declare function evaluateFaceDeformation(cartridge: IFaceCartridge, pose: IFacePoseState, outPositions: Float32Array, outNormals: Float32Array): void;
+type AtlasPainter = (appearance: IFaceAppearance, damageTier: number, size: number) => Uint8Array;
+declare function registerAtlasPainter(painter: AtlasPainter | null): void;
 declare function generateFaceAtlasPixels(appearance: IFaceAppearance, damageTier?: number, size?: number): Uint8Array;
 declare function createRoostrFaceMesh(gl: WebGLRenderingContext, cartridge: IFaceCartridge, damageTier?: number, atlasSize?: number): {
     customMesh: CustomMesh;
@@ -283,8 +387,8 @@ declare class FaceR {
     readonly gaze: GazeController;
     readonly blink: BlinkController;
     readonly impulse: ImpulseController;
-    readonly deformedPositions: Float32Array;
-    readonly deformedNormals: Float32Array;
+    deformedPositions: Float32Array;
+    deformedNormals: Float32Array;
     readonly pose: IFacePoseState;
     autonomous: boolean;
     customMesh: CustomMesh | null;
@@ -293,12 +397,13 @@ declare class FaceR {
     private _gl;
     private _health;
     private _traumaTime;
+    private _deadTime;
     constructor(cartridge?: IFaceCartridge | Record<string, unknown>, options?: IFaceROptions);
     bindWebGL(gl: WebGLRenderingContext): Mesh;
     loadCartridge(cartridge: IFaceCartridge | Record<string, unknown>): this;
     rebuildRig(recomputeMuscles?: boolean): this;
     setHairStyle(style: HaircutStyleName): this;
-    setBaseHead(baseHead: BaseHeadId): this;
+    setBaseHead(baseHead: string): this;
     refreshAtlasTexture(): Uint8Array;
     setEmotion(name: string, weight: number, immediate?: boolean): this;
     setExclusiveEmotion(name: string, weight?: number, immediate?: boolean): this;
@@ -308,11 +413,12 @@ declare class FaceR {
     lookAt(target: Vec3, headOrigin?: Vec3): this;
     triggerBlink(duration?: number): this;
     triggerImpulse(type: IImpulseEvent['type'], intensity?: number, direction?: Vec3, duration?: number): this;
+    setShooting(on: boolean): this;
     setHealth(healthPercent: number): this;
     getHealth(): number;
     setDamageTier(tier: number): this;
     update(dt: number): IFacePoseState;
 }
 
-export { BASE_HEAD_ARCHETYPES, BASE_HEAD_IDS, BlinkController, ExpressionCompositor, FACE_REGIONS, FACE_REGION_IDS, FACS_MUSCLE_NAMES, FaceR, GazeController, HAIRCUT_STYLES, HAIR_CAP_VERTEX_COUNT, ImpulseController, Perlin1D, applyHaircutStyleToPositions, applyMacroProportions, computeFacsMuscles, computeSmoothNormals, createBaseHeadTopology, createDefaultAppearance, createDefaultCartridge, createDefaultEmotions, createDefaultPersonality, createDefaultProportions, createRoostrFaceMesh, evaluateFaceDeformation, generateFaceAtlasPixels, getCanonicalBaseHead, hydrateCartridge, parseObjToCartridge, parseObjToTopology, rebuildCartridgeRig, rotateVec3ByQuat, serializeCartridge, syncRoostrMeshBuffers };
-export type { BaseHeadId, FaceRegionName, FacsMuscleName, HaircutStyleName, IBaseHeadTopology, IEmotionLayer, IFaceAppearance, IFaceCartridge, IFacePivots, IFacePoseState, IFaceROptions, IImpulseEvent, IMacroProportions, IPersonalityProfile, ISparseMuscleDelta, ISubMeshRange };
+export { BlinkController, ExpressionCompositor, FACE_REGIONS, FACE_REGION_IDS, FACS_MUSCLE_NAMES, FaceR, GazeController, HAIR_CAP_VERTEX_COUNT, ImpulseController, Perlin1D, applyHaircutStyleToPositions, applyMacroProportions, computeFacsMuscles, computeSmoothNormals, createDefaultAppearance, createDefaultCartridge, createDefaultEmotions, createDefaultPersonality, createDefaultProportions, createRoostrFaceMesh, deserializeBaseHead, deserializeFaceProfile, deserializeHairStyle, evaluateFaceDeformation, generateFaceAtlasPixels, getCanonicalBaseHead, getFaceProfile, getHairStyle, hasBaseHead, hasHairStyle, hydrateCartridge, invalidateDeformCache, loadBaseHead, loadFaceProfile, loadHairStyle, parseObjToCartridge, parseObjToTopology, rebuildCartridgeRig, registerAtlasPainter, registerBaseHead, registerFaceProfile, registerHairStyle, rotateVec3ByQuat, serializeCartridge, syncRoostrMeshBuffers };
+export type { AtlasPainter, BaseHeadId, FaceRegionName, FacsMuscleName, HaircutStyleName, IBaseHeadTopology, IDamageMuscle, IDamageProfile, IDamageZone, IEmotionLayer, IFaceAppearance, IFaceCartridge, IFacePivots, IFacePoseState, IFaceProfile, IFaceROptions, IHairStyle, IImpulseEvent, IImpulseRecipe, IMacroProportions, IPersonalityProfile, ISparseMuscleDelta, ISubMeshRange };

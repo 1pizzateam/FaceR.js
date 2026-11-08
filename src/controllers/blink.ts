@@ -2,6 +2,8 @@ import { Utils } from '@1pizzateam/spock';
 import { IPersonalityProfile } from '../interfaces';
 import { Perlin1D } from '../noise/perlin1d';
 
+const DEFAULT_BLINK_DURATION = 0.16;
+
 /**
  * Ken Perlin Stochastic Blink & Eyelid-Follow Controller.
  * Generates natural asymmetric blink envelopes (`fast downstroke -> brief closure -> smooth upstroke`),
@@ -17,7 +19,7 @@ export class BlinkController {
   private _time = 0;
   private _timeUntilNextBlink = 2.8;
   private _blinkElapsed = -1;
-  private _activeDuration = 0.16;
+  private _activeDuration = DEFAULT_BLINK_DURATION;
 
   constructor(seed = 303) {
     this._noise = new Perlin1D(seed);
@@ -29,9 +31,7 @@ export class BlinkController {
   public triggerBlink(duration?: number): void {
     if (this._blinkElapsed < 0) {
       this._blinkElapsed = 0;
-      if (duration && duration > 0.04) {
-        this._activeDuration = duration;
-      }
+      this._activeDuration = duration !== undefined && duration > 0.04 ? duration : DEFAULT_BLINK_DURATION;
     }
   }
 

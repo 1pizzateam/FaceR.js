@@ -1,10 +1,7 @@
 import { Vec2, Vec3 } from '@1pizzateam/spock';
 import {
-  BASE_HEAD_IDS,
-  BaseHeadId,
   FACS_MUSCLE_NAMES,
   FacsMuscleName,
-  HAIRCUT_STYLES,
   HaircutStyleName,
   IMacroProportions,
   IFacePivots,
@@ -16,25 +13,58 @@ import {
 } from './interfaces';
 import {
   getCanonicalBaseHead,
+  hasBaseHead,
   computeSmoothNormals,
   parseObjToTopology,
   applyHaircutStyleToPositions,
+  hasHairStyle,
   IBaseHeadGeometry
 } from './anatomy/baseHead';
 import { applyMacroProportions, computeFacsMuscles } from './anatomy/muscleTransfer';
+import { invalidateDeformCache } from './deformer/facerMesh';
+import { getFaceProfile, defaultBaseHeadId } from './profile';
+
+function isValidMuscleDelta(raw: any, vertexCount: number): boolean {
+  if (!raw || typeof raw !== 'object' || !raw.indices || !raw.dPos) return false;
+  const n = raw.indices.length;
+  if (typeof n !== 'number' || raw.dPos.length !== n * 3) return false;
+  if (raw.dNorm && raw.dNorm.length !== n * 3) return false;
+  for (let i = 0; i < n; i++) {
+    const v = raw.indices[i];
+    if (!Number.isInteger(v) || v < 0 || v >= vertexCount) return false;
+  }
+  for (let i = 0; i < n * 3; i++) {
+    if (!Number.isFinite(Number(raw.dPos[i]))) return false;
+  }
+  return true;
+}
+
+function sanitizeMuscleWeights(raw: unknown): Partial<Record<FacsMuscleName, number>> {
+  const out: Partial<Record<FacsMuscleName, number>> = {};
+  if (!raw || typeof raw !== 'object') return out;
+  for (const m of FACS_MUSCLE_NAMES) {
+    const v = Number((raw as Record<string, unknown>)[m]);
+    if (Number.isFinite(v) && v !== 0) out[m] = Math.min(1, Math.max(0, v));
+  }
+  return out;
+}
+
+function numOr(val: unknown, def: number): number {
+  return typeof val === 'number' && Number.isFinite(val) ? val : def;
+}
 
 function toVec2(val: unknown, defX: number, defY: number): Vec2 {
   if (val instanceof Vec2) {
     return new Vec2().copy(val);
   }
   if (Array.isArray(val) && val.length >= 2) {
-    return new Vec2(Number(val[0]) || 0, Number(val[1]) || 0);
+    return new Vec2(numOr(Number(val[0]), 0), numOr(Number(val[1]), 0));
   }
   if (val && typeof val === 'object') {
     const obj = val as Record<string, unknown>;
     return new Vec2(
-      typeof obj.x === 'number' ? obj.x : defX,
-      typeof obj.y === 'number' ? obj.y : defY
+      numOr(obj.x, defX),
+      numOr(obj.y, defY)
     );
   }
   return new Vec2(defX, defY);
@@ -45,14 +75,14 @@ function toVec3(val: unknown, defX: number, defY: number, defZ: number): Vec3 {
     return new Vec3().copy(val);
   }
   if (Array.isArray(val) && val.length >= 3) {
-    return new Vec3(Number(val[0]) || 0, Number(val[1]) || 0, Number(val[2]) || 0);
+    return new Vec3(numOr(Number(val[0]), 0), numOr(Number(val[1]), 0), numOr(Number(val[2]), 0));
   }
   if (val && typeof val === 'object') {
     const obj = val as Record<string, unknown>;
     return new Vec3(
-      typeof obj.x === 'number' ? obj.x : defX,
-      typeof obj.y === 'number' ? obj.y : defY,
-      typeof obj.z === 'number' ? obj.z : defZ
+      numOr(obj.x, defX),
+      numOr(obj.y, defY),
+      numOr(obj.z, defZ)
     );
   }
   return new Vec3(defX, defY, defZ);
@@ -76,143 +106,33 @@ export function createDefaultProportions(): IMacroProportions {
 }
 
 /**
- * Create the 9 canonical Ken Perlin / DoomR emotion presets as layered FACS muscle recipes.
+ * The default emotion layers: the registered face profile's emotions (FaceR ships none), or just `neutral`.
  */
 export function createDefaultEmotions(): Record<string, IEmotionLayer> {
-  return {
-    neutral: {
-      name: 'neutral',
-      muscles: {},
-      headEulerOffset: new Vec3(0, 0, 0)
-    },
-    angry: {
-      name: 'angry',
-      muscles: {
-        browDownL: 0.92,
-        browDownR: 0.92,
-        eyeSquintL: 0.55,
-        eyeSquintR: 0.55,
-        noseSneerL: 0.65,
-        noseSneerR: 0.65,
-        mouthUpperUpL: 0.48,
-        mouthUpperUpR: 0.48,
-        mouthLowerDownL: 0.35,
-        mouthLowerDownR: 0.35,
-        jawForward: 0.42,
-        jawOpen: 0.22
-      },
-      headEulerOffset: new Vec3(-0.08, 0, 0)
-    },
-    evilGrin: {
-      name: 'evilGrin',
-      muscles: {
-        browDownL: 0.75,
-        browDownR: 0.75,
-        browOuterUpL: 0.45,
-        browOuterUpR: 0.45,
-        eyeSquintL: 0.65,
-        eyeSquintR: 0.65,
-        cheekSquintL: 0.72,
-        cheekSquintR: 0.72,
-        mouthSmileL: 0.95,
-        mouthSmileR: 0.95,
-        mouthUpperUpL: 0.35,
-        mouthUpperUpR: 0.35,
-        jawOpen: 0.28
-      },
-      headEulerOffset: new Vec3(-0.05, 0.04, 0)
-    },
-    pain: {
-      name: 'pain',
-      muscles: {
-        browInnerUp: 0.85,
-        browDownL: 0.65,
-        browDownR: 0.65,
-        eyeBlinkL: 0.75,
-        eyeBlinkR: 0.75,
-        eyeSquintL: 0.90,
-        eyeSquintR: 0.90,
-        cheekSquintL: 0.80,
-        cheekSquintR: 0.80,
-        noseSneerL: 0.60,
-        noseSneerR: 0.60,
-        jawOpen: 0.68,
-        mouthFrownL: 0.65,
-        mouthFrownR: 0.65,
-        mouthLowerDownL: 0.55,
-        mouthLowerDownR: 0.55
-      },
-      headEulerOffset: new Vec3(0.12, -0.06, 0.05)
-    },
-    surprised: {
-      name: 'surprised',
-      muscles: {
-        browInnerUp: 0.88,
-        browOuterUpL: 0.82,
-        browOuterUpR: 0.82,
-        eyeWideL: 0.92,
-        eyeWideR: 0.92,
-        jawOpen: 0.62,
-        mouthFunnel: 0.55
-      },
-      headEulerOffset: new Vec3(0.06, 0, 0)
-    },
-    skeptical: {
-      name: 'skeptical',
-      muscles: {
-        browDownL: 0.82,
-        browOuterUpR: 0.88,
-        browInnerUp: 0.32,
-        eyeSquintL: 0.62,
-        mouthSmileR: 0.42,
-        mouthFrownL: 0.35,
-        mouthShrugUpper: 0.38
-      },
-      headEulerOffset: new Vec3(-0.03, -0.06, 0.05)
-    },
-    tired: {
-      name: 'tired',
-      muscles: {
-        browInnerUp: 0.38,
-        eyeBlinkL: 0.48,
-        eyeBlinkR: 0.48,
-        mouthFrownL: 0.35,
-        mouthFrownR: 0.35,
-        jawOpen: 0.18
-      },
-      headEulerOffset: new Vec3(-0.12, 0, -0.03)
-    },
-    alert: {
-      name: 'alert',
-      muscles: {
-        browDownL: 0.42,
-        browDownR: 0.42,
-        eyeWideL: 0.55,
-        eyeWideR: 0.55,
-        mouthPress: 0.48,
-        jawForward: 0.25
-      },
-      headEulerOffset: new Vec3(-0.04, 0, 0)
-    },
-    dead: {
-      name: 'dead',
-      muscles: {
-        eyeBlinkL: 0.82,
-        eyeBlinkR: 0.88,
-        jawOpen: 0.52,
-        jawLeft: 0.25,
-        mouthFrownL: 0.32,
-        mouthFrownR: 0.32
-      },
-      headEulerOffset: new Vec3(-0.26, 0.14, -0.18)
-    }
+  const out: Record<string, IEmotionLayer> = {
+    neutral: { name: 'neutral', muscles: {}, headEulerOffset: new Vec3(0, 0, 0) }
   };
+  const profile = getFaceProfile();
+  if (profile) {
+    for (const [name, layer] of Object.entries(profile.emotions)) {
+      out[name] = { name, muscles: { ...layer.muscles }, headEulerOffset: new Vec3().copy(layer.headEulerOffset) };
+    }
+  }
+  return out;
 }
 
 /**
  * Create default Ken Perlin autonomous behavioral personality profile.
  */
 export function createDefaultPersonality(): IPersonalityProfile {
+  const p = getFaceProfile()?.personality;
+  if (p) {
+    return {
+      ...p,
+      blinkIntervalRange: new Vec2().copy(p.blinkIntervalRange),
+      saccadeAmplitude: new Vec2().copy(p.saccadeAmplitude)
+    };
+  }
   return {
     blinkIntervalRange: new Vec2(2.2, 5.2),
     blinkDuration: 0.16,
@@ -230,18 +150,20 @@ export function createDefaultPersonality(): IPersonalityProfile {
  * Create default appearance palette (`Vec3` RGB colors in `0..1` + damage seed).
  */
 export function createDefaultAppearance(): IFaceAppearance {
+  const a = getFaceProfile()?.appearance ?? {};
+  const col = (v: Vec3 | undefined, d: [number, number, number]) => new Vec3().copy(v ?? new Vec3(d[0], d[1], d[2]));
   return {
-    baseHead: 'african_sculpt',
-    skinColor: new Vec3(0.38, 0.23, 0.15),
-    skinShadowColor: new Vec3(0.18, 0.10, 0.06),
-    lipColor: new Vec3(0.34, 0.17, 0.15),
-    irisColor: new Vec3(0.22, 0.13, 0.07),
-    scleraColor: new Vec3(0.95, 0.93, 0.90),
-    browColor: new Vec3(0.08, 0.05, 0.04),
-    hairColor: new Vec3(0.07, 0.05, 0.04),
+    baseHead: getFaceProfile()?.defaultBaseHead ?? '',
+    skinColor: col(a.skinColor, [0.6, 0.5, 0.45]),
+    skinShadowColor: col(a.skinShadowColor, [0.3, 0.24, 0.2]),
+    lipColor: col(a.lipColor, [0.5, 0.3, 0.28]),
+    irisColor: col(a.irisColor, [0.25, 0.2, 0.15]),
+    scleraColor: col(a.scleraColor, [0.95, 0.93, 0.9]),
+    browColor: col(a.browColor, [0.15, 0.1, 0.08]),
+    hairColor: col(a.hairColor, [0.15, 0.1, 0.08]),
     hairStyle: 'bald',
-    teethColor: new Vec3(0.94, 0.92, 0.88),
-    damageSeed: 1337
+    teethColor: col(a.teethColor, [0.94, 0.92, 0.88]),
+    damageSeed: a.damageSeed ?? 1337
   };
 }
 
@@ -256,8 +178,22 @@ export function rebuildCartridgeRig(
 ): IFaceCartridge {
   const baseHead: IBaseHeadGeometry =
     ((cartridge as any)._baseTopology as IBaseHeadGeometry | undefined) ??
-    getCanonicalBaseHead(cartridge.appearance?.baseHead ?? 'african_sculpt');
+    getCanonicalBaseHead(cartridge.appearance?.baseHead || defaultBaseHeadId());
 
+  // A different base head topology (e.g. the dedicated scan-based European head) needs its own index buffer,
+  // UVs, submeshes, region map and jaw weights, not just resized positions.
+  if (
+    cartridge.positions.length !== baseHead.positions.length ||
+    cartridge.indices.length !== baseHead.indices.length ||
+    cartridge.uvs.length !== baseHead.uvs.length
+  ) {
+    cartridge.uvs = new Float32Array(baseHead.uvs);
+    cartridge.indices = new Int32Array(baseHead.indices);
+    cartridge.submeshes = baseHead.submeshes.map(sm => ({ ...sm }));
+    cartridge.vertexRegionMap = new Uint8Array(baseHead.vertexRegionMap);
+    cartridge.jawWeights = new Float32Array(baseHead.jawWeights);
+    cartridge.sculptOffsets = new Float32Array(baseHead.positions.length);
+  }
   if (!cartridge.sculptOffsets || cartridge.sculptOffsets.length !== baseHead.positions.length) {
     cartridge.sculptOffsets = new Float32Array(baseHead.positions.length);
   }
@@ -291,6 +227,7 @@ export function rebuildCartridgeRig(
     );
   }
 
+  invalidateDeformCache(cartridge);
   return cartridge;
 }
 
@@ -300,12 +237,14 @@ export function rebuildCartridgeRig(
  * Perlin personality profile, and appearance palette.
  */
 export function createDefaultCartridge(
-  name = 'Marine Face',
-  id = 'marine_face'
+  name = 'Face',
+  id = 'face',
+  baseHeadId: string = defaultBaseHeadId()
 ): IFaceCartridge {
-  const baseHead = getCanonicalBaseHead();
+  const baseHead = getCanonicalBaseHead(baseHeadId);
   const proportions = createDefaultProportions();
   const appearance = createDefaultAppearance();
+  appearance.baseHead = baseHeadId;
   const sculptOffsets = new Float32Array(baseHead.positions.length);
   const positions = new Float32Array(baseHead.positions.length);
   const pivots: IFacePivots = {
@@ -349,7 +288,7 @@ export function createDefaultCartridge(
 
 /**
  * Parse a Wavefront `.obj` 3D head mesh string and automatically rig it into a
- * ready-to-animate `IFaceCartridge` with 32 FACS muscles, jaw weights, and
+ * ready-to-animate `IFaceCartridge` with 31 FACS muscles, jaw weights, and
  * Ken Perlin personality parameters.
  */
 export function parseObjToCartridge(
@@ -502,7 +441,7 @@ export function serializeCartridge(cartridge: IFaceCartridge): Record<string, un
       microJitterAmount: cartridge.personality.microJitterAmount
     },
     appearance: {
-      baseHead: cartridge.appearance.baseHead ?? 'african_sculpt',
+      baseHead: cartridge.appearance.baseHead ?? '',
       skinColor: vec3ToArray(cartridge.appearance.skinColor),
       skinShadowColor: vec3ToArray(cartridge.appearance.skinShadowColor),
       lipColor: vec3ToArray(cartridge.appearance.lipColor),
@@ -533,16 +472,16 @@ export function hydrateCartridge(raw: unknown): IFaceCartridge {
   const defApp = createDefaultAppearance();
   const rawApp = obj.appearance || {};
   const rawBaseHead = rawApp.baseHead ?? obj.baseHead;
-  const baseHeadId: BaseHeadId =
-    typeof rawBaseHead === 'string' && (BASE_HEAD_IDS as readonly string[]).includes(rawBaseHead)
-      ? (rawBaseHead as BaseHeadId)
-      : (defApp.baseHead ?? 'african_sculpt');
+  const baseHeadId: string =
+    typeof rawBaseHead === 'string' && hasBaseHead(rawBaseHead)
+      ? rawBaseHead
+      : (defApp.baseHead || defaultBaseHeadId());
   const baseHead = getCanonicalBaseHead(baseHeadId);
 
   const rawHairStyle = rawApp.hairStyle;
   const hairStyle: HaircutStyleName =
-    typeof rawHairStyle === 'string' && (HAIRCUT_STYLES as readonly string[]).includes(rawHairStyle)
-      ? (rawHairStyle as HaircutStyleName)
+    typeof rawHairStyle === 'string' && hasHairStyle(rawHairStyle)
+      ? rawHairStyle
       : defApp.hairStyle;
 
   const appearance: IFaceAppearance = {
@@ -561,7 +500,7 @@ export function hydrateCartridge(raw: unknown): IFaceCartridge {
     ),
     hairStyle,
     teethColor: toVec3(rawApp.teethColor, defApp.teethColor.x, defApp.teethColor.y, defApp.teethColor.z),
-    damageSeed: typeof rawApp.damageSeed === 'number' ? rawApp.damageSeed : defApp.damageSeed,
+    damageSeed: numOr(rawApp.damageSeed, defApp.damageSeed),
     customTierOverrides:
       rawApp.customTierOverrides && typeof rawApp.customTierOverrides === 'object'
         ? { ...rawApp.customTierOverrides }
@@ -608,20 +547,14 @@ export function hydrateCartridge(raw: unknown): IFaceCartridge {
   applyMacroProportions(baseHead, proportions, sculptOffsets, positions, pivots);
   applyHaircutStyleToPositions(positions, baseHead.submeshes, appearance.hairStyle);
 
-  if (obj.pivots) {
-    if (obj.pivots.neck) pivots.neck = toVec3(obj.pivots.neck, pivots.neck.x, pivots.neck.y, pivots.neck.z);
-    if (obj.pivots.jaw) pivots.jaw = toVec3(obj.pivots.jaw, pivots.jaw.x, pivots.jaw.y, pivots.jaw.z);
-    if (obj.pivots.eyeLeft) pivots.eyeLeft = toVec3(obj.pivots.eyeLeft, pivots.eyeLeft.x, pivots.eyeLeft.y, pivots.eyeLeft.z);
-    if (obj.pivots.eyeRight) pivots.eyeRight = toVec3(obj.pivots.eyeRight, pivots.eyeRight.x, pivots.eyeRight.y, pivots.eyeRight.z);
-  }
-
   const normals = computeSmoothNormals(positions, baseHead.indices);
 
   let muscles: Record<FacsMuscleName, ISparseMuscleDelta>;
+  const vertexCount = (positions.length / 3) | 0;
   const hasCompleteSavedMuscles =
     obj.muscles &&
     typeof obj.muscles === 'object' &&
-    FACS_MUSCLE_NAMES.every(m => obj.muscles[m] && obj.muscles[m].indices && obj.muscles[m].dPos);
+    FACS_MUSCLE_NAMES.every(m => isValidMuscleDelta(obj.muscles[m], vertexCount));
 
   if (hasCompleteSavedMuscles) {
     muscles = {} as Record<FacsMuscleName, ISparseMuscleDelta>;
@@ -654,7 +587,7 @@ export function hydrateCartridge(raw: unknown): IFaceCartridge {
       if (rawLayer && typeof rawLayer === 'object') {
         emotions[k] = {
           name: typeof rawLayer.name === 'string' ? rawLayer.name : k,
-          muscles: { ...(rawLayer.muscles || {}) },
+          muscles: sanitizeMuscleWeights(rawLayer.muscles),
           headEulerOffset: toVec3(rawLayer.headEulerOffset, 0, 0, 0)
         };
       }
@@ -665,14 +598,14 @@ export function hydrateCartridge(raw: unknown): IFaceCartridge {
   const rawPers = obj.personality || {};
   const personality: IPersonalityProfile = {
     blinkIntervalRange: toVec2(rawPers.blinkIntervalRange, defPers.blinkIntervalRange.x, defPers.blinkIntervalRange.y),
-    blinkDuration: typeof rawPers.blinkDuration === 'number' ? rawPers.blinkDuration : defPers.blinkDuration,
-    saccadeFrequency: typeof rawPers.saccadeFrequency === 'number' ? rawPers.saccadeFrequency : defPers.saccadeFrequency,
+    blinkDuration: numOr(rawPers.blinkDuration, defPers.blinkDuration),
+    saccadeFrequency: numOr(rawPers.saccadeFrequency, defPers.saccadeFrequency),
     saccadeAmplitude: toVec2(rawPers.saccadeAmplitude, defPers.saccadeAmplitude.x, defPers.saccadeAmplitude.y),
-    headFollowRatio: typeof rawPers.headFollowRatio === 'number' ? rawPers.headFollowRatio : defPers.headFollowRatio,
-    headDamping: typeof rawPers.headDamping === 'number' ? rawPers.headDamping : defPers.headDamping,
-    eyeDamping: typeof rawPers.eyeDamping === 'number' ? rawPers.eyeDamping : defPers.eyeDamping,
-    asymmetryAmount: typeof rawPers.asymmetryAmount === 'number' ? rawPers.asymmetryAmount : defPers.asymmetryAmount,
-    microJitterAmount: typeof rawPers.microJitterAmount === 'number' ? rawPers.microJitterAmount : defPers.microJitterAmount
+    headFollowRatio: numOr(rawPers.headFollowRatio, defPers.headFollowRatio),
+    headDamping: numOr(rawPers.headDamping, defPers.headDamping),
+    eyeDamping: numOr(rawPers.eyeDamping, defPers.eyeDamping),
+    asymmetryAmount: numOr(rawPers.asymmetryAmount, defPers.asymmetryAmount),
+    microJitterAmount: numOr(rawPers.microJitterAmount, defPers.microJitterAmount)
   };
 
   return {

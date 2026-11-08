@@ -1,7 +1,7 @@
 {
   "name": "@1pizzateam/facer",
   "version": "0.1.0",
-  "description": "Ken Perlin Responsive Face runtime engine and FACS anatomical rig library built on Spock and RoostR",
+  "description": "Real-time anatomical facial animation: FACS rig transfer, layered emotions, Perlin-driven gaze, blinking and combat impulses, with WebGL mesh sync via RoostR.",
   "type": "module",
   "sideEffects": false,
   "main": "dist/facer.js",
@@ -9,17 +9,23 @@
   "exports": {
     ".": {
       "types": "./dist/facer.d.ts",
-      "import": "./dist/facer.js"
-    }
+      "import": "./dist/facer.js",
+      "default": "./dist/facer.js"
+    },
+    "./package.json": "./package.json"
   },
   "keywords": [
-    "perlin",
     "face",
-    "animation",
+    "facial-animation",
     "facs",
-    "morph",
+    "morph-targets",
+    "blendshapes",
+    "perlin-noise",
+    "gaze",
+    "blink",
     "webgl",
     "3d",
+    "game",
     "roostr",
     "spock",
     "typescript"
@@ -41,10 +47,13 @@
     "build": "npm run build:lib && npm run test",
     "build:lib": "node ./scripts/clear.js && tsc && npm run rollup && node ./scripts/copy.js",
     "rollup": "rollup --config rollup.config.mjs",
-    "test": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --coverage"
+    "test": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --coverage",
+    "prepublishOnly": "npm run build"
   },
   "files": [
-    "dist/"
+    "dist/",
+    "CHANGELOG.md",
+    "NOTICE.md"
   ],
   "publishConfig": {
     "access": "public"
@@ -62,7 +71,7 @@
     "typescript": "6.0.3"
   },
   "dependencies": {
-    "@1pizzateam/roostr": "0.9.0",
-    "@1pizzateam/spock": "4.5.0"
+    "@1pizzateam/roostr": "0.9.1",
+    "@1pizzateam/spock": "^4.6.0"
   }
 }

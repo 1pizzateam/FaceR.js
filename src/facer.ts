@@ -1,11 +1,9 @@
 import { Vec2, Vec3, Quat, Utils } from '@1pizzateam/spock';
 import { CustomMesh, Mesh, Texture } from '@1pizzateam/roostr';
 import {
-  BASE_HEAD_IDS,
   BaseHeadId,
   FACS_MUSCLE_NAMES,
   FacsMuscleName,
-  HAIRCUT_STYLES,
   HaircutStyleName,
   FACE_REGIONS,
   FACE_REGION_IDS,
@@ -23,15 +21,34 @@ import {
 } from './interfaces';
 import { Perlin1D } from './noise/perlin1d';
 import {
-  BASE_HEAD_ARCHETYPES,
   IBaseHeadTopology,
   HAIR_CAP_VERTEX_COUNT,
-  createBaseHeadTopology,
   getCanonicalBaseHead,
+  registerBaseHead,
+  hasBaseHead,
+  deserializeBaseHead,
+  loadBaseHead,
   computeSmoothNormals,
   parseObjToTopology,
-  applyHaircutStyleToPositions
+  applyHaircutStyleToPositions,
+  IHairStyle,
+  registerHairStyle,
+  hasHairStyle,
+  getHairStyle,
+  deserializeHairStyle,
+  loadHairStyle
 } from './anatomy/baseHead';
+import {
+  getFaceProfile,
+  registerFaceProfile,
+  deserializeFaceProfile,
+  loadFaceProfile,
+  IFaceProfile,
+  IDamageProfile,
+  IDamageZone,
+  IDamageMuscle,
+  IImpulseRecipe
+} from './profile';
 import { applyMacroProportions, computeFacsMuscles } from './anatomy/muscleTransfer';
 import {
   createDefaultProportions,
@@ -51,7 +68,10 @@ import { ImpulseController } from './controllers/impulse';
 import {
   rotateVec3ByQuat,
   evaluateFaceDeformation,
+  invalidateDeformCache,
   generateFaceAtlasPixels,
+  registerAtlasPainter,
+  AtlasPainter,
   createRoostrFaceMesh,
   syncRoostrMeshBuffers
 } from './deformer/facerMesh';
@@ -64,7 +84,24 @@ export interface IFaceROptions {
 }
 
 const ZERO_VEC3 = new Vec3(0, 0, 0);
+const MAX_DT = 0.25;
+/** Seconds a dying face keeps settling into its death expression before it is frozen for good. */
+const DEAD_SETTLE = 1.5;
 const _eulerScratch = new Vec3(0, 0, 0);
+
+function sanitizeAtlasSize(size: number | undefined): number {
+  if (size === undefined || !Number.isFinite(size)) return 256;
+  return Utils.clamp(Math.round(size), 16, 4096);
+}
+
+function isHydratedCartridge(c: IFaceCartridge | Record<string, unknown>): boolean {
+  return (
+    c.positions instanceof Float32Array &&
+    typeof c.proportions === 'object' &&
+    c.proportions !== null &&
+    (c.proportions as IMacroProportions).craniumScale instanceof Vec3
+  );
+}
 
 /**
  * High-level Ken Perlin Responsive Face runtime controller (`FaceR`).
@@ -79,8 +116,8 @@ export class FaceR {
   public readonly blink: BlinkController;
   public readonly impulse: ImpulseController;
 
-  public readonly deformedPositions: Float32Array;
-  public readonly deformedNormals: Float32Array;
+  public deformedPositions: Float32Array;
+  public deformedNormals: Float32Array;
   public readonly pose: IFacePoseState;
 
   public autonomous: boolean;
@@ -91,23 +128,19 @@ export class FaceR {
   private _gl: WebGLRenderingContext | null = null;
   private _health = 100;
   private _traumaTime = 0;
+  private _deadTime = 0;
 
   constructor(
     cartridge?: IFaceCartridge | Record<string, unknown>,
     options: IFaceROptions = {}
   ) {
     const seed = options.seed ?? 1337;
-    this.atlasSize = options.atlasSize ?? 256;
+    this.atlasSize = sanitizeAtlasSize(options.atlasSize);
     this.autonomous = options.autonomous ?? true;
 
     if (!cartridge) {
       this.cartridge = createDefaultCartridge();
-    } else if (
-      'positions' in cartridge &&
-      cartridge.positions instanceof Float32Array &&
-      'proportions' in cartridge &&
-      (cartridge.proportions as IMacroProportions).craniumScale instanceof Vec3
-    ) {
+    } else if (isHydratedCartridge(cartridge)) {
       this.cartridge = cartridge as IFaceCartridge;
     } else {
       this.cartridge = hydrateCartridge(cartridge);
@@ -156,28 +189,30 @@ export class FaceR {
    * Load a new `IFaceCartridge` (or serialized `.facer` JSON object) into this instance.
    */
   public loadCartridge(cartridge: IFaceCartridge | Record<string, unknown>): this {
-    this.cartridge =
-      'positions' in cartridge && cartridge.positions instanceof Float32Array
-        ? (cartridge as IFaceCartridge)
-        : hydrateCartridge(cartridge);
+    this.cartridge = isHydratedCartridge(cartridge)
+      ? (cartridge as IFaceCartridge)
+      : hydrateCartridge(cartridge);
 
-    for (const key of Object.keys(this.compositor.emotions)) {
-      delete this.compositor.emotions[key];
+    // Snapshot first: the compositor may share its emotions object with the cartridge being reloaded.
+    const nextEmotions = Object.entries(this.cartridge.emotions);
+    const emotions = this.compositor.emotions;
+    for (const key of Object.keys(emotions)) {
+      delete emotions[key];
+      delete this.compositor.emotionWeights[key];
+      delete this.compositor.targetEmotionWeights[key];
     }
-    for (const [k, layer] of Object.entries(this.cartridge.emotions)) {
-      this.compositor.emotions[k] = layer;
-      if (this.compositor.emotionWeights[k] === undefined) {
-        this.compositor.emotionWeights[k] = 0;
-        this.compositor.targetEmotionWeights[k] = 0;
-      }
+    for (const [k, layer] of nextEmotions) {
+      emotions[k] = layer;
+      this.compositor.emotionWeights[k] = 0;
+      this.compositor.targetEmotionWeights[k] = 0;
     }
 
     const topologyChanged =
       this.deformedPositions.length !== this.cartridge.positions.length;
 
     if (topologyChanged) {
-      (this as any).deformedPositions = new Float32Array(this.cartridge.positions);
-      (this as any).deformedNormals = new Float32Array(this.cartridge.normals);
+      this.deformedPositions = new Float32Array(this.cartridge.positions);
+      this.deformedNormals = new Float32Array(this.cartridge.normals);
       if (this._gl) {
         this.bindWebGL(this._gl);
       }
@@ -202,10 +237,13 @@ export class FaceR {
   }
 
   /**
-   * Switch the active 3D haircut / headgear style (`'bald'`, `'buzz_fade'`, `'flattop'`,
-   * `'afro_short'`, `'mohawk'`, `'slick_back'`, `'dreadlocks'`, `'combat_helmet'`) on any head.
+   * Switch the active hair style: `'bald'` (built in) or a style loaded with `loadHairStyle` / `registerHairStyle`
+   * (FaceR ships none; the game provides them).
    */
   public setHairStyle(style: HaircutStyleName): this {
+    if (!hasHairStyle(style)) {
+      throw new Error(`FaceR: hair style "${style}" is not registered. Load its .facerhair.json (loadHairStyle) first.`);
+    }
     this.cartridge.appearance.hairStyle = style;
     this.rebuildRig(false);
     if (this._gl && this.mesh) {
@@ -215,15 +253,13 @@ export class FaceR {
   }
 
   /**
-   * Switch the underlying 3D Base Head Archetype (`'african_sculpt'`, `'european_scan'`,
-   * `'boggie_sculpt'`, `'walt_classic'`, `'east_asian'`, `'nordic_angular'`, `'gracile_feminine'`)
+   * Switch the underlying base head to one registered with `registerBaseHead` (FaceR ships no heads:
+   * load `heads/<id>.facerhead.json`, decode it with `deserializeBaseHead`, then register it)
    * non-destructively while preserving all macro proportion sliders, haircut, and appearance colors.
    */
-  public setBaseHead(baseHead: BaseHeadId): this {
+  public setBaseHead(baseHead: string): this {
     this.cartridge.appearance.baseHead = baseHead;
-    if ('_baseTopology' in (this.cartridge as any)) {
-      delete (this.cartridge as any)._baseTopology;
-    }
+    delete (this.cartridge as { _baseTopology?: unknown })._baseTopology;
     const canonical = getCanonicalBaseHead(baseHead);
     const topologyChanged = this.cartridge.positions.length !== canonical.positions.length;
     if (topologyChanged) {
@@ -235,8 +271,8 @@ export class FaceR {
       this.cartridge.vertexRegionMap = new Uint8Array(canonical.vertexRegionMap);
       this.cartridge.jawWeights = new Float32Array(canonical.jawWeights);
       this.cartridge.sculptOffsets = new Float32Array(canonical.positions.length);
-      (this as any).deformedPositions = new Float32Array(canonical.positions.length);
-      (this as any).deformedNormals = new Float32Array(canonical.normals.length);
+      this.deformedPositions = new Float32Array(canonical.positions.length);
+      this.deformedNormals = new Float32Array(canonical.normals.length);
     }
     this.rebuildRig(true);
     if (topologyChanged && this._gl) {
@@ -332,7 +368,17 @@ export class FaceR {
     direction?: Vec3,
     duration?: number
   ): this {
-    this.impulse.triggerImpulse(type, intensity, direction, duration);
+    // the dead do not flinch
+    if (this._health > 0)
+      this.impulse.triggerImpulse(type, intensity, direction, duration);
+    return this;
+  }
+
+  /**
+   * Holds the clenched shooting snarl while `on` is true (a weapon that keeps firing), easing in and out.
+   */
+  public setShooting(on: boolean): this {
+    this.impulse.setShooting(on && this._health > 0);
     return this;
   }
 
@@ -341,24 +387,28 @@ export class FaceR {
    * progressive damage state (`0..4`) and refreshing the skin texture if changed.
    */
   public setHealth(healthPercent: number): this {
+    if (!Number.isFinite(healthPercent)) return this;
     const wasDead = this._health <= 0;
     this._health = Utils.clamp(healthPercent, 0, 100);
+    // damage tiers come from the face profile (health below each threshold raises the tier); no profile means no damage
+    const thresholds = getFaceProfile()?.damage?.tierHealthThresholds ?? [];
     let tier = 0;
     if (this._health <= 0) {
-      tier = 4;
+      tier = thresholds.length;
+      if (!wasDead) {
+        // a dead character stops moving: drop every reaction in flight and let the eyes and head settle on their rest pose
+        this.impulse.activeImpulses.length = 0;
+        this.impulse.setShooting(false);
+        this.gaze.targetGazeAngles.origin();
+        this._deadTime = 0;
+      }
       this.setExclusiveEmotion('dead', 1.0);
     } else {
       if (wasDead) {
         this.setEmotion('dead', 0.0, true);
       }
-      if (this._health < 20) {
-        tier = 4;
-      } else if (this._health < 40) {
-        tier = 3;
-      } else if (this._health < 60) {
-        tier = 2;
-      } else if (this._health < 80) {
-        tier = 1;
+      for (let i = 0; i < thresholds.length; i++) {
+        if (this._health < thresholds[i]) tier = i + 1;
       }
     }
     this.setDamageTier(tier);
@@ -385,13 +435,24 @@ export class FaceR {
    * Advance the responsive face simulation by `dt` seconds and deform the mesh buffers.
    */
   public update(dt: number): IFacePoseState {
+    // Guard against NaN / negative deltas and clamp long stalls (e.g. a backgrounded tab) to keep the simulation stable.
+    dt = Number.isFinite(dt) && dt > 0 ? Math.min(dt, MAX_DT) : 0;
     const pers = this.cartridge.personality;
+
+    // A dead character does not move. The face is given DEAD_SETTLE seconds to ease into its death expression, then it is
+    // frozen exactly as it is: no gaze, blink, neck follow-through or noise, until the health is raised again.
+    const dead = this._health <= 0;
+    if (dead && dt > 0) {
+      this._deadTime += dt;
+      if (this._deadTime > DEAD_SETTLE)
+        return this.pose;
+    }
 
     // 1. Update transient impulses
     this.impulse.update(dt);
 
     // 2. Update gaze, saccades, and neck follow-through
-    if (this.autonomous) {
+    if (this.autonomous && !dead) {
       this.gaze.update(
         dt,
         pers,
@@ -428,42 +489,43 @@ export class FaceR {
       this.blink.eyelidPitchFollow
     );
 
+    if (this.autonomous && !dead) {
+      this.gaze.applyHeadEuler(this.compositor.currentHeadEuler);
+    } else {
+      this.gaze.neckQuat.setFromEuler(this.compositor.currentHeadEuler);
+    }
+
     // 4. Populate current pose state
     for (let i = 0; i < FACS_MUSCLE_NAMES.length; i++) {
       const m = FACS_MUSCLE_NAMES[i];
       this.pose.muscles[m] = this.compositor.currentMuscles[m];
     }
 
-    // 4b. Layer dynamic wounded facial grimace, swollen left-eye squint & labored panting when injured
+    // 4b. Layer the profile's wounded grimace (squint, wince, labored panting) when injured
     this._traumaTime += dt;
-    if (this.pose.damageTier > 0 && this._health > 0 && this.autonomous) {
+    const reaction = getFaceProfile()?.damage?.reaction;
+    if (reaction && this.pose.damageTier > 0 && this._health > 0 && this.autonomous) {
       const tier = this.pose.damageTier;
       const traumaIntensity = Math.max(
-        Utils.clamp((85 - this._health) / 85, 0, 1),
-        tier * 0.22
+        Utils.clamp((reaction.intensityHealthRef - this._health) / reaction.intensityHealthRef, 0, 1),
+        tier * reaction.intensityPerTier
       );
       const m = this.pose.muscles;
-
-      // Swollen left eye squint & protective orbital wince
-      m.eyeSquintL = Utils.clamp(m.eyeSquintL + 0.16 * tier, 0, 1);
-      m.eyeBlinkL = Utils.clamp(m.eyeBlinkL + 0.11 * tier, 0, 1);
-      m.cheekSquintL = Utils.clamp(m.cheekSquintL + 0.14 * tier, 0, 1);
-      m.browDownL = Utils.clamp(m.browDownL + 0.12 * tier, 0, 1);
-      m.browInnerUp = Utils.clamp(m.browInnerUp + 0.14 * traumaIntensity, 0, 1);
-
-      if (tier >= 2) {
-        // Pain sneer & labored mouth-breathing wave
-        const breathFreq = 2.6 + traumaIntensity * 2.4;
+      let pantAmount = 0;
+      const pant = reaction.pant;
+      if (pant && tier >= pant.minTier) {
+        const breathFreq = pant.freqBase + traumaIntensity * pant.freqIntensity;
         const breathWave = 0.5 + 0.5 * Math.sin(this._traumaTime * breathFreq);
-        const pantAmount = (tier - 1) * 0.085 * (0.45 + 0.55 * breathWave);
-
-        m.noseSneerL = Utils.clamp(m.noseSneerL + 0.12 * (tier - 1), 0, 1);
-        m.mouthUpperUpL = Utils.clamp(m.mouthUpperUpL + 0.09 * (tier - 1), 0, 1);
-        m.mouthFrownL = Utils.clamp(m.mouthFrownL + 0.10 * (tier - 1), 0, 1);
-        m.mouthFrownR = Utils.clamp(m.mouthFrownR + 0.10 * (tier - 1), 0, 1);
-        m.jawOpen = Utils.clamp(m.jawOpen + pantAmount, 0, 1);
-        m.mouthLowerDownL = Utils.clamp(m.mouthLowerDownL + pantAmount * 0.75, 0, 1);
-        m.mouthLowerDownR = Utils.clamp(m.mouthLowerDownR + pantAmount * 0.75, 0, 1);
+        pantAmount = (tier - pant.tierBase) * pant.perTier * (pant.floor + (1 - pant.floor) * breathWave);
+      }
+      for (let i = 0; i < reaction.muscles.length; i++) {
+        const r = reaction.muscles[i];
+        if (tier < r.minTier) continue;
+        m[r.muscle] = Utils.clamp(
+          m[r.muscle] + r.perTier * (tier - r.tierBase) + r.intensity * traumaIntensity + r.pant * pantAmount,
+          0,
+          1
+        );
       }
     }
 
@@ -498,12 +560,9 @@ export class FaceR {
 }
 
 export {
-  BASE_HEAD_IDS,
   BaseHeadId,
-  BASE_HEAD_ARCHETYPES,
   FACS_MUSCLE_NAMES,
   FacsMuscleName,
-  HAIRCUT_STYLES,
   HaircutStyleName,
   FACE_REGIONS,
   FACE_REGION_IDS,
@@ -521,11 +580,29 @@ export {
   Perlin1D,
   IBaseHeadTopology,
   HAIR_CAP_VERTEX_COUNT,
-  createBaseHeadTopology,
   getCanonicalBaseHead,
+  registerBaseHead,
+  hasBaseHead,
+  deserializeBaseHead,
+  loadBaseHead,
   computeSmoothNormals,
   parseObjToTopology,
   applyHaircutStyleToPositions,
+  IHairStyle,
+  registerHairStyle,
+  hasHairStyle,
+  getHairStyle,
+  deserializeHairStyle,
+  loadHairStyle,
+  IFaceProfile,
+  IDamageProfile,
+  IDamageZone,
+  IDamageMuscle,
+  IImpulseRecipe,
+  registerFaceProfile,
+  getFaceProfile,
+  deserializeFaceProfile,
+  loadFaceProfile,
   applyMacroProportions,
   computeFacsMuscles,
   createDefaultProportions,
@@ -543,7 +620,10 @@ export {
   ImpulseController,
   rotateVec3ByQuat,
   evaluateFaceDeformation,
+  invalidateDeformCache,
   generateFaceAtlasPixels,
+  registerAtlasPainter,
+  AtlasPainter,
   createRoostrFaceMesh,
   syncRoostrMeshBuffers
 };

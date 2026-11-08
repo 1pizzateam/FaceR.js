@@ -2,3 +2,6 @@ node_modules/
 build/
 tests/coverage/
 .DS_Store
+website/node_modules/
+website/docs/.vitepress/cache/
+website/docs/.vitepress/dist/

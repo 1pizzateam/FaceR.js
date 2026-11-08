@@ -90,6 +90,7 @@ export class ExpressionCompositor {
    * Set the target weight `[0..1]` of a named emotion layer.
    */
   public setEmotion(name: string, weight: number, immediate = false): void {
+    if (!Number.isFinite(weight)) return;
     const clamped = Utils.clamp(weight, 0, 1);
     this.targetEmotionWeights[name] = clamped;
     if (immediate) {
@@ -114,7 +115,7 @@ export class ExpressionCompositor {
   public setMuscleOverride(muscle: FacsMuscleName, weight: number | null): void {
     if (weight === null || weight === undefined) {
       delete this.directMuscleOverrides[muscle];
-    } else {
+    } else if (Number.isFinite(weight)) {
       this.directMuscleOverrides[muscle] = Utils.clamp(weight, 0, 1);
     }
   }
@@ -239,17 +240,24 @@ export class ExpressionCompositor {
       }
     }
 
-    // 6. Smoothly damp muscle activations and head Euler offsets
+    // 6. Smoothly damp muscle activations and head Euler offsets (impulses already shape their own attack/release)
     const muscleRate = Math.max(12.0, personality.headDamping * 2.2);
     for (let i = 0; i < FACS_MUSCLE_NAMES.length; i++) {
       const m = FACS_MUSCLE_NAMES[i];
+      if ((impulseMuscles?.[m] ?? 0) > 0) {
+        this.currentMuscles[m] = this._targetMuscles[m];
+        continue;
+      }
       const isBlink = m === 'eyeBlinkL' || m === 'eyeBlinkR';
       const rate = isBlink ? 45.0 : muscleRate;
       this.currentMuscles[m] =
         dt > 0 ? Utils.damp(this.currentMuscles[m], this._targetMuscles[m], rate, dt) : this._targetMuscles[m];
     }
 
-    if (dt > 0) {
+    const hasImpulseHead =
+      impulseHeadEuler !== undefined &&
+      (impulseHeadEuler.x !== 0 || impulseHeadEuler.y !== 0 || impulseHeadEuler.z !== 0);
+    if (dt > 0 && !hasImpulseHead) {
       this.currentHeadEuler.x = Utils.damp(this.currentHeadEuler.x, this._targetHeadEuler.x, emotionRate, dt);
       this.currentHeadEuler.y = Utils.damp(this.currentHeadEuler.y, this._targetHeadEuler.y, emotionRate, dt);
       this.currentHeadEuler.z = Utils.damp(this.currentHeadEuler.z, this._targetHeadEuler.z, emotionRate, dt);

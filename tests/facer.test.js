@@ -1,14 +1,16 @@
 import {
   FaceR,
-  BASE_HEAD_IDS,
-  BASE_HEAD_ARCHETYPES,
   FACS_MUSCLE_NAMES,
-  HAIRCUT_STYLES,
   HAIR_CAP_VERTEX_COUNT,
   FACE_REGIONS,
   Perlin1D,
-  createBaseHeadTopology,
   getCanonicalBaseHead,
+  registerBaseHead,
+  hasBaseHead,
+  deserializeBaseHead,
+  deserializeHairStyle,
+  registerHairStyle,
+  hasHairStyle,
   createDefaultCartridge,
   parseObjToCartridge,
   serializeCartridge,
@@ -17,9 +19,51 @@ import {
   GazeController,
   BlinkController,
   ImpulseController,
-  generateFaceAtlasPixels
+  generateFaceAtlasPixels,
+  registerAtlasPainter,
+  deserializeFaceProfile,
+  registerFaceProfile,
+  getFaceProfile,
+  createDefaultEmotions
 } from '../dist/facer.js';
 import { Vec2, Vec3 } from '@1pizzateam/spock';
+import { readFileSync } from 'node:fs';
+
+// FaceR owns no heads: the tests use the one head the documentation website serves.
+const TEST_HEADS = ['african_sculpt'];
+for (const id of TEST_HEADS) {
+  const file = new URL(`../website/docs/public/heads/${id}.facerhead.json`, import.meta.url);
+  registerBaseHead(id, deserializeBaseHead(JSON.parse(readFileSync(file, 'utf8'))));
+}
+
+// FaceR owns no look or reactions either: a small synthetic face profile stands in for the game's.
+registerFaceProfile(deserializeFaceProfile({
+  format: 'facer-profile', version: 1, id: 'test', defaultBaseHead: 'african_sculpt',
+  emotions: {
+    angry: { muscles: { browDownL: 0.92, browDownR: 0.92, eyeSquintL: 0.55, jawOpen: 0.06 }, headEulerOffset: [-0.08, 0, 0] },
+    evilGrin: { muscles: { browDownL: 0.75, browDownR: 0.75, mouthSmileL: 0.95 }, headEulerOffset: [-0.05, 0.04, 0] },
+    dead: { muscles: { eyeBlinkL: 0.82, eyeBlinkR: 0.88, jawOpen: 0.52 }, headEulerOffset: [-0.26, 0.14, -0.18] },
+  },
+  appearance: { skinColor: [0.38, 0.23, 0.15], damageSeed: 1337 },
+  damage: {
+    tierHealthThresholds: [95, 80, 60, 40], minZ: 2.2,
+    zones: [{ id: 'malar', center: [-1.95, 1.05, 5.45], radii: [1.15, 0.85, 1.4], minTier: 1, tierBase: 0, weight: 0.085, normal: [1, 1, 1.15], constant: [0, -0.03, 0] }],
+    reaction: { intensityHealthRef: 85, intensityPerTier: 0.22, pant: { minTier: 2, perTier: 0.085, tierBase: 1, floor: 0.45, freqBase: 2.6, freqIntensity: 2.4 },
+      muscles: [{ muscle: 'eyeSquintL', minTier: 1, perTier: 0.16 }, { muscle: 'jawOpen', minTier: 2, pant: 1 }] },
+  },
+  impulses: {
+    pain: { duration: 0.45, attack: 0.18, muscles: { eyeSquintL: 0.92, jawOpen: 0.65 }, headEuler: [0.18, 0, 0], headEulerDirX: [0, -0.25, 0.14] },
+    shoot: { duration: 0.25, attack: 0.12, muscles: { browDownL: 0.88, mouthPress: 0.85 }, headEuler: [-0.08, 0, 0] },
+  },
+}));
+
+// FaceR owns no hair styles either: register a synthetic one (cap lifted by 0.1 on Y, constant shade map).
+const SHADE = Buffer.alloc(16, 200).toString('base64');
+registerHairStyle(deserializeHairStyle({
+  format: 'facer-hair', version: 1, id: 'test_style',
+  capDelta: Array.from({ length: HAIR_CAP_VERTEX_COUNT * 3 }, (_, i) => (i % 3 === 1 ? 0.1 : 0)),
+  atlas: { size: 4, shade: SHADE, skinMix: Buffer.alloc(16, 0).toString('base64') },
+}));
 
 describe('FaceR.js (@1pizzateam/facer)', () => {
   describe('Perlin1D coherent noise', () => {
@@ -52,7 +96,7 @@ describe('FaceR.js (@1pizzateam/facer)', () => {
 
   describe('Anatomical Base Head & Automatic FACS Rig Transfer', () => {
     test('generates high-poly symmetrical head with 6 anatomical submeshes and all FACS muscles', () => {
-      const base = createBaseHeadTopology();
+      const base = getCanonicalBaseHead('african_sculpt');
       expect(base.vertexCount).toBeGreaterThan(1000);
       expect(base.triangleCount).toBeGreaterThan(1800);
       expect(base.submeshes.length).toBe(FACE_REGIONS.length);
@@ -106,25 +150,81 @@ describe('FaceR.js (@1pizzateam/facer)', () => {
 
       // Verify modular haircuts can be applied to both canonical and imported .OBJ heads
       const face = new FaceR(imported);
-      for (const style of HAIRCUT_STYLES) {
+      for (const style of ['bald', 'test_style']) {
         face.setHairStyle(style);
         expect(face.cartridge.appearance.hairStyle).toBe(style);
       }
     });
 
-    test('supports all 7 built-in Base Head Archetypes with distinct sculpt geometry and haircuts', () => {
-      expect(BASE_HEAD_IDS.length).toBe(7);
+    test('the atlas painter is supplied by the game: flat skin colour by default, the registered painter otherwise', () => {
+      const face = new FaceR();
+      const app = face.cartridge.appearance;
+      const flat = generateFaceAtlasPixels(app, 0, 8);
+      expect(flat.length).toBe(8 * 8 * 4);
+      expect(flat[0]).toBe(Math.round(app.skinColor.x * 255));
+      registerAtlasPainter((_a, tier, size) => new Uint8Array(size * size * 4).fill(tier + 1));
+      expect(generateFaceAtlasPixels(app, 2, 8)[5]).toBe(3);
+      registerAtlasPainter(() => new Uint8Array(3));
+      expect(() => generateFaceAtlasPixels(app, 0, 8)).toThrow(/expected/);
+      registerAtlasPainter(null);
+      expect(generateFaceAtlasPixels(app, 0, 8)[0]).toBe(flat[0]);
+    });
+
+    test('without a face profile FaceR has neutral defaults, no damage and no reactions', () => {
+      const profile = getFaceProfile();
+      registerFaceProfile(null);
+      try {
+        expect(Object.keys(createDefaultEmotions())).toEqual(['neutral']);
+        expect(() => createDefaultCartridge()).toThrow(/no base head named/);
+        const face = new FaceR(createDefaultCartridge('Face', 'face', 'african_sculpt'));
+        face.setHealth(10);
+        expect(face.pose.damageTier).toBe(0);
+        face.triggerImpulse('pain', 1);
+        expect(face.impulse.activeImpulses.length).toBe(0);
+      } finally {
+        registerFaceProfile(profile);
+      }
+      const hurt = new FaceR();
+      hurt.setHealth(50);
+      expect(hurt.pose.damageTier).toBe(3);
+      hurt.triggerImpulse('pain', 1);
+      expect(hurt.impulse.activeImpulses.length).toBe(1);
+    });
+
+    test('hair styles are registered assets: unknown styles throw, a registered one moves the cap by its delta', () => {
+      expect(hasHairStyle('bald')).toBe(true);
+      expect(hasHairStyle('test_style')).toBe(true);
+      expect(hasHairStyle('mohawk')).toBe(false);
+      const face = new FaceR();
+      expect(() => face.setHairStyle('mohawk')).toThrow(/not registered/);
+      const sm = face.cartridge.submeshes.find((m) => m.name === 'browsHair');
+      const capY = (sm.startVertex + sm.vertexCount - HAIR_CAP_VERTEX_COUNT) * 3 + 1;
+      face.setHairStyle('bald');
+      const bald = face.cartridge.positions[capY];
+      face.setHairStyle('test_style');
+      expect(face.cartridge.positions[capY]).not.toBeCloseTo(bald, 3);
+      expect(() => deserializeHairStyle({ format: 'nope' })).toThrow();
+    });
+
+    test('supports a registered base head with haircuts', () => {
       const face = new FaceR();
       const canonicalCount = face.cartridge.positions.length;
 
-      for (const id of BASE_HEAD_IDS) {
-        expect(BASE_HEAD_ARCHETYPES[id]).toBeDefined();
+      for (const id of TEST_HEADS) {
+        expect(hasBaseHead(id)).toBe(true);
         const geom = getCanonicalBaseHead(id);
-        expect(geom.positions.length).toBe(canonicalCount);
+        // european_scan is a dedicated scan-based head with its own topology; all others share the canonical mesh
+        if (id === 'european_scan') {
+          expect(geom.positions.length).toBeGreaterThan(canonicalCount);
+        } else {
+          expect(geom.positions.length).toBe(canonicalCount);
+        }
         face.setBaseHead(id);
         expect(face.cartridge.appearance.baseHead).toBe(id);
-        face.setHairStyle('buzz_fade');
-        expect(face.cartridge.positions.length).toBe(canonicalCount);
+        face.setHairStyle('test_style');
+        expect(face.cartridge.positions.length).toBe(geom.positions.length);
+        expect(face.cartridge.indices.length).toBe(geom.indices.length);
+        expect(Object.keys(face.cartridge.muscles).length).toBeGreaterThan(0);
       }
     });
   });
@@ -192,7 +292,7 @@ describe('FaceR.js (@1pizzateam/facer)', () => {
       face.setEmotion('angry', 0.9, true);
       face.setGazeAngles(new Vec2(0.35, -0.15));
       face.triggerImpulse('shoot', 1.0);
-      face.setHealth(35);
+      face.setHealth(50);
 
       expect(face.pose.damageTier).toBe(3);
 
@@ -212,6 +312,44 @@ describe('FaceR.js (@1pizzateam/facer)', () => {
         diffSum += Math.abs(face.deformedPositions[i] - face.cartridge.positions[i]);
       }
       expect(diffSum).toBeGreaterThan(100);
+    });
+  });
+
+  describe('Robustness (v0.1.0 audit)', () => {
+    test('loadCartridge accepts the cartridge already loaded without losing emotions', () => {
+      const face = new FaceR(undefined, { autonomous: false });
+      const names = Object.keys(face.cartridge.emotions);
+      face.loadCartridge(face.cartridge);
+      expect(Object.keys(face.compositor.emotions)).toEqual(names);
+      expect(names.length).toBeGreaterThan(0);
+    });
+
+    test('update ignores NaN / negative dt and non-finite inputs never corrupt the mesh', () => {
+      const face = new FaceR();
+      face.update(NaN);
+      face.update(-1);
+      face.update(1e6);
+      face.setEmotion('angry', NaN);
+      face.triggerImpulse('pain', NaN);
+      face.setGazeAngles(new Vec2(NaN, 0));
+      face.setHealth(NaN);
+      face.update(1 / 60);
+      for (const v of face.deformedPositions) expect(Number.isFinite(v)).toBe(true);
+      for (const v of face.deformedNormals) expect(Number.isFinite(v)).toBe(true);
+    });
+
+    test('hydrateCartridge rejects malformed saved muscle deltas and recomputes them', () => {
+      const raw = serializeCartridge(createDefaultCartridge());
+      raw.muscles.jawOpen.indices = [999999];
+      const cart = hydrateCartridge(raw);
+      const vCount = cart.positions.length / 3;
+      for (const idx of cart.muscles.jawOpen.indices) expect(idx).toBeLessThan(vCount);
+      expect(cart.muscles.jawOpen.dPos.length).toBe(cart.muscles.jawOpen.indices.length * 3);
+    });
+
+    test('parseObjToCartridge ignores out-of-range faces and throws on empty geometry', () => {
+      expect(() => parseObjToCartridge('# nothing here')).toThrow(/no usable geometry/);
+      expect(() => parseObjToCartridge('v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 9')).toThrow(/no usable geometry/);
     });
   });
 });

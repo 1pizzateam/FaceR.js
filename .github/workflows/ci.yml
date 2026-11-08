@@ -32,5 +32,12 @@ jobs:
         if: github.event_name != 'pull_request' || !startsWith(github.head_ref, 'feature/issue-')
         run: npm run build
 
+      - name: Build documentation website
+        if: github.event_name != 'pull_request' || !startsWith(github.head_ref, 'feature/issue-')
+        working-directory: website
+        run: |
+          npm ci
+          npm run build
+
       - name: Build Docker image
         run: docker build --tag facer:ci .

@@ -1,0 +1,581 @@
+{
+ "format": "facer-profile",
+ "version": 1,
+ "id": "doomr",
+ "defaultBaseHead": "african_sculpt",
+ "emotions": {
+  "neutral": {
+   "muscles": {},
+   "headEulerOffset": [
+    0,
+    0,
+    0
+   ]
+  },
+  "angry": {
+   "muscles": {
+    "browDownL": 0.92,
+    "browDownR": 0.92,
+    "eyeSquintL": 0.55,
+    "eyeSquintR": 0.55,
+    "noseSneerL": 0.65,
+    "noseSneerR": 0.65,
+    "mouthUpperUpL": 0.18,
+    "mouthUpperUpR": 0.18,
+    "mouthLowerDownL": 0.08,
+    "mouthLowerDownR": 0.08,
+    "jawForward": 0.42,
+    "jawOpen": 0.06
+   },
+   "headEulerOffset": [
+    -0.08,
+    0,
+    0
+   ]
+  },
+  "evilGrin": {
+   "muscles": {
+    "browDownL": 0.75,
+    "browDownR": 0.75,
+    "browOuterUpL": 0.45,
+    "browOuterUpR": 0.45,
+    "eyeSquintL": 0.65,
+    "eyeSquintR": 0.65,
+    "cheekSquintL": 0.72,
+    "cheekSquintR": 0.72,
+    "mouthSmileL": 0.85,
+    "mouthSmileR": 0.85,
+    "mouthUpperUpL": 0.14,
+    "mouthUpperUpR": 0.14,
+    "jawOpen": 0.1
+   },
+   "headEulerOffset": [
+    -0.05,
+    0.04,
+    0
+   ]
+  },
+  "pain": {
+   "muscles": {
+    "browInnerUp": 0.85,
+    "browDownL": 0.65,
+    "browDownR": 0.65,
+    "eyeBlinkL": 0.75,
+    "eyeBlinkR": 0.75,
+    "eyeSquintL": 0.9,
+    "eyeSquintR": 0.9,
+    "cheekSquintL": 0.8,
+    "cheekSquintR": 0.8,
+    "noseSneerL": 0.6,
+    "noseSneerR": 0.6,
+    "jawOpen": 0.68,
+    "mouthFrownL": 0.65,
+    "mouthFrownR": 0.65,
+    "mouthLowerDownL": 0.55,
+    "mouthLowerDownR": 0.55
+   },
+   "headEulerOffset": [
+    0.12,
+    -0.06,
+    0.05
+   ]
+  },
+  "surprised": {
+   "muscles": {
+    "browInnerUp": 0.88,
+    "browOuterUpL": 0.82,
+    "browOuterUpR": 0.82,
+    "eyeWideL": 0.92,
+    "eyeWideR": 0.92,
+    "jawOpen": 0.62,
+    "mouthFunnel": 0.55
+   },
+   "headEulerOffset": [
+    0.06,
+    0,
+    0
+   ]
+  },
+  "skeptical": {
+   "muscles": {
+    "browDownL": 0.82,
+    "browOuterUpR": 0.88,
+    "browInnerUp": 0.32,
+    "eyeSquintL": 0.62,
+    "mouthSmileR": 0.42,
+    "mouthFrownL": 0.35,
+    "mouthShrugUpper": 0.38
+   },
+   "headEulerOffset": [
+    -0.03,
+    -0.06,
+    0.05
+   ]
+  },
+  "tired": {
+   "muscles": {
+    "browInnerUp": 0.38,
+    "eyeBlinkL": 0.48,
+    "eyeBlinkR": 0.48,
+    "mouthFrownL": 0.35,
+    "mouthFrownR": 0.35,
+    "jawOpen": 0.18
+   },
+   "headEulerOffset": [
+    -0.12,
+    0,
+    -0.03
+   ]
+  },
+  "alert": {
+   "muscles": {
+    "browDownL": 0.42,
+    "browDownR": 0.42,
+    "eyeWideL": 0.55,
+    "eyeWideR": 0.55,
+    "mouthPress": 0.48,
+    "jawForward": 0.25
+   },
+   "headEulerOffset": [
+    -0.04,
+    0,
+    0
+   ]
+  },
+  "dead": {
+   "muscles": {
+    "eyeBlinkL": 0.82,
+    "eyeBlinkR": 0.88,
+    "jawOpen": 0.52,
+    "jawLeft": 0.25,
+    "mouthFrownL": 0.32,
+    "mouthFrownR": 0.32
+   },
+   "headEulerOffset": [
+    -0.26,
+    0.14,
+    -0.18
+   ]
+  }
+ },
+ "appearance": {
+  "damageSeed": 1337,
+  "skinColor": [
+   0.38,
+   0.23,
+   0.15
+  ],
+  "skinShadowColor": [
+   0.18,
+   0.1,
+   0.06
+  ],
+  "lipColor": [
+   0.34,
+   0.17,
+   0.15
+  ],
+  "irisColor": [
+   0.22,
+   0.13,
+   0.07
+  ],
+  "scleraColor": [
+   0.95,
+   0.93,
+   0.9
+  ],
+  "browColor": [
+   0.08,
+   0.05,
+   0.04
+  ],
+  "hairColor": [
+   0.07,
+   0.05,
+   0.04
+  ],
+  "teethColor": [
+   0.94,
+   0.92,
+   0.88
+  ]
+ },
+ "personality": {
+  "blinkIntervalRange": [
+   2.2,
+   5.2
+  ],
+  "blinkDuration": 0.16,
+  "saccadeFrequency": 0.85,
+  "saccadeAmplitude": [
+   0.28,
+   0.16
+  ],
+  "headFollowRatio": 0.42,
+  "headDamping": 7.5,
+  "eyeDamping": 26,
+  "asymmetryAmount": 0.08,
+  "microJitterAmount": 0.04
+ },
+ "material": {
+  "ambient": [
+   0.38,
+   0.34,
+   0.34
+  ],
+  "diffuse": [
+   0.92,
+   0.9,
+   0.88
+  ],
+  "specular": [
+   0.22,
+   0.2,
+   0.18
+  ],
+  "shininess": 22
+ },
+ "damage": {
+  "tierHealthThresholds": [
+   95,
+   80,
+   60,
+   40
+  ],
+  "minZ": 2.2,
+  "zones": [
+   {
+    "id": "malar",
+    "center": [
+     -1.95,
+     1.05,
+     5.45
+    ],
+    "radii": [
+     1.15,
+     0.85,
+     1.4
+    ],
+    "minTier": 1,
+    "tierBase": 0,
+    "weight": 0.085,
+    "normal": [
+     1,
+     1,
+     1.15
+    ],
+    "constant": [
+     0,
+     -0.03,
+     0
+    ]
+   },
+   {
+    "id": "lid",
+    "center": [
+     -1.78,
+     2.18,
+     5.55
+    ],
+    "radii": [
+     0.72,
+     0.36,
+     1.1
+    ],
+    "minTier": 1,
+    "tierBase": 0,
+    "weight": 0.055,
+    "normal": [
+     0,
+     0,
+     0
+    ],
+    "constant": [
+     0,
+     -1,
+     0.45
+    ]
+   },
+   {
+    "id": "brow",
+    "center": [
+     2.05,
+     2.92,
+     5.75
+    ],
+    "radii": [
+     0.95,
+     0.52,
+     1.25
+    ],
+    "minTier": 2,
+    "tierBase": 1,
+    "weight": 0.075,
+    "normal": [
+     1,
+     0.6,
+     1.2
+    ],
+    "constant": [
+     0,
+     0,
+     0
+    ]
+   },
+   {
+    "id": "lip",
+    "center": [
+     0.68,
+     -2.62,
+     6.35
+    ],
+    "radii": [
+     0.58,
+     0.38,
+     1.1
+    ],
+    "minTier": 2,
+    "tierBase": 1,
+    "weight": 0.07,
+    "normal": [
+     0,
+     0,
+     0
+    ],
+    "constant": [
+     0,
+     -0.55,
+     1.15
+    ]
+   },
+   {
+    "id": "nose",
+    "center": [
+     0,
+     0.68,
+     6.75
+    ],
+    "radii": [
+     0.92,
+     1.05,
+     1.35
+    ],
+    "minTier": 3,
+    "tierBase": 2,
+    "weight": 0.16,
+    "normal": [
+     0,
+     0,
+     0
+    ],
+    "constant": [
+     1,
+     0,
+     0.3125
+    ]
+   }
+  ],
+  "reaction": {
+   "intensityHealthRef": 85,
+   "intensityPerTier": 0.22,
+   "pant": {
+    "minTier": 2,
+    "perTier": 0.085,
+    "tierBase": 1,
+    "floor": 0.45,
+    "freqBase": 2.6,
+    "freqIntensity": 2.4
+   },
+   "muscles": [
+    {
+     "muscle": "eyeSquintL",
+     "minTier": 1,
+     "tierBase": 0,
+     "perTier": 0.16
+    },
+    {
+     "muscle": "eyeBlinkL",
+     "minTier": 1,
+     "tierBase": 0,
+     "perTier": 0.11
+    },
+    {
+     "muscle": "cheekSquintL",
+     "minTier": 1,
+     "tierBase": 0,
+     "perTier": 0.14
+    },
+    {
+     "muscle": "browDownL",
+     "minTier": 1,
+     "tierBase": 0,
+     "perTier": 0.12
+    },
+    {
+     "muscle": "browInnerUp",
+     "minTier": 1,
+     "intensity": 0.14
+    },
+    {
+     "muscle": "noseSneerL",
+     "minTier": 2,
+     "tierBase": 1,
+     "perTier": 0.12
+    },
+    {
+     "muscle": "mouthUpperUpL",
+     "minTier": 2,
+     "tierBase": 1,
+     "perTier": 0.09
+    },
+    {
+     "muscle": "mouthFrownL",
+     "minTier": 2,
+     "tierBase": 1,
+     "perTier": 0.1
+    },
+    {
+     "muscle": "mouthFrownR",
+     "minTier": 2,
+     "tierBase": 1,
+     "perTier": 0.1
+    },
+    {
+     "muscle": "jawOpen",
+     "minTier": 2,
+     "pant": 1
+    },
+    {
+     "muscle": "mouthLowerDownL",
+     "minTier": 2,
+     "pant": 0.75
+    },
+    {
+     "muscle": "mouthLowerDownR",
+     "minTier": 2,
+     "pant": 0.75
+    }
+   ]
+  }
+ },
+ "impulses": {
+  "pain": {
+   "duration": 0.45,
+   "attack": 0.18,
+   "muscles": {
+    "browInnerUp": 0.85,
+    "browDownL": 0.7,
+    "browDownR": 0.7,
+    "eyeSquintL": 0.92,
+    "eyeSquintR": 0.92,
+    "eyeBlinkL": 0.75,
+    "eyeBlinkR": 0.75,
+    "cheekSquintL": 0.8,
+    "cheekSquintR": 0.8,
+    "noseSneerL": 0.65,
+    "noseSneerR": 0.65,
+    "jawOpen": 0.65,
+    "mouthFrownL": 0.65,
+    "mouthFrownR": 0.65
+   },
+   "headEuler": [
+    0.18,
+    0,
+    0
+   ],
+   "headEulerDirX": [
+    0,
+    -0.25,
+    0.14
+   ]
+  },
+  "shoot": {
+   "duration": 0.25,
+   "attack": 0.12,
+   "muscles": {
+    "browDownL": 0.88,
+    "browDownR": 0.88,
+    "eyeSquintL": 0.65,
+    "eyeSquintR": 0.65,
+    "noseSneerL": 0.72,
+    "noseSneerR": 0.72,
+    "mouthUpperUpL": 0.2,
+    "mouthUpperUpR": 0.2,
+    "mouthPress": 0.85,
+    "jawForward": 0.55
+   },
+   "headEuler": [
+    -0.08,
+    0,
+    0
+   ]
+  },
+  "surprise": {
+   "duration": 0.65,
+   "attack": 0.18,
+   "muscles": {
+    "browInnerUp": 0.92,
+    "browOuterUpL": 0.85,
+    "browOuterUpR": 0.85,
+    "eyeWideL": 0.95,
+    "eyeWideR": 0.95,
+    "jawOpen": 0.58,
+    "mouthFunnel": 0.52
+   },
+   "headEuler": [
+    0.1,
+    0,
+    0
+   ]
+  },
+  "glance": {
+   "duration": 0.9,
+   "attack": 0.18,
+   "directionalMuscles": [
+    {
+     "muscle": "browOuterUpL",
+     "whenXNegative": 0.45,
+     "otherwise": 0.15
+    },
+    {
+     "muscle": "browOuterUpR",
+     "whenXNegative": 0.15,
+     "otherwise": 0.45
+    }
+   ],
+   "gazeFromDir": {
+    "maxX": 0.75,
+    "maxY": 0.45
+   }
+  },
+  "evilGrin": {
+   "duration": 1.4,
+   "attack": 0.18,
+   "muscles": {
+    "browDownL": 0.8,
+    "browDownR": 0.8,
+    "browOuterUpL": 0.48,
+    "browOuterUpR": 0.48,
+    "eyeSquintL": 0.68,
+    "eyeSquintR": 0.68,
+    "cheekSquintL": 0.78,
+    "cheekSquintR": 0.78,
+    "mouthSmileL": 0.86,
+    "mouthSmileR": 0.86,
+    "mouthUpperUpL": 0.16,
+    "mouthUpperUpR": 0.16,
+    "jawOpen": 0.08
+   },
+   "headEuler": [
+    -0.06,
+    0,
+    0
+   ]
+  }
+ },
+ "holdShooting": {
+  "holdRiseRate": 35,
+  "holdFallRate": 22
+ }
+}

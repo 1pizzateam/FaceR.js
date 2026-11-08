@@ -43,6 +43,7 @@ export class GazeController {
    * Set explicit gaze angles (`angles.x = yaw`, `angles.y = pitch` in radians).
    */
   public setGazeAngles(angles: Vec2): void {
+    if (!Number.isFinite(angles.x) || !Number.isFinite(angles.y)) return;
     this.targetGazeAngles.setScalar(
       Utils.clamp(angles.x, -0.85, 0.85),
       Utils.clamp(angles.y, -0.65, 0.65)
@@ -55,6 +56,7 @@ export class GazeController {
   public lookAt(target: Vec3, headOrigin: Vec3 = ZERO_VEC3): void {
     this._lookDir.subVectors(target, headOrigin);
     const len = this._lookDir.getMagnitude();
+    if (!Number.isFinite(len)) return;
     if (len < 1e-5) {
       this.targetGazeAngles.origin();
       return;
@@ -150,11 +152,7 @@ export class GazeController {
     this._driftAmpVec3.setScalar(jitter, jitter, jitter * 0.7);
     this._noise.fbmVec3(this._time, DRIFT_FREQ_VEC3, this._driftAmpVec3, 2, this._headDriftEuler, 8);
 
-    // Build Neck Quaternion (Pitch around X, Yaw around Y, Roll around Z)
-    const neckPitch = -this.currentHeadAngles.y + extraHeadEulerOffset.x + this._headDriftEuler.x;
-    const neckYaw = this.currentHeadAngles.x + extraHeadEulerOffset.y + this._headDriftEuler.y;
-    const neckRoll = extraHeadEulerOffset.z + this._headDriftEuler.z - this.currentHeadAngles.x * 0.08;
-    this.neckQuat.setFromEuler(this._eulerScratch.setScalar(neckPitch, neckYaw, neckRoll));
+    this.applyHeadEuler(extraHeadEulerOffset);
 
     // Build Left & Right Eyeball Quaternions (with slight natural vergence)
     const eyePitch = -this.currentEyeAngles.y;
@@ -162,5 +160,15 @@ export class GazeController {
     const vergence = 0.025;
     this.eyeLeftQuat.setFromEuler(this._eulerScratch.setScalar(eyePitch, eyeYaw + vergence, 0));
     this.eyeRightQuat.setFromEuler(this._eulerScratch.setScalar(eyePitch, eyeYaw - vergence, 0));
+  }
+
+  /**
+   * Rebuild `neckQuat` from current gaze follow angles, postural drift, and `extraHeadEulerOffset`.
+   */
+  public applyHeadEuler(extraHeadEulerOffset: Vec3 = ZERO_VEC3): void {
+    const neckPitch = -this.currentHeadAngles.y + extraHeadEulerOffset.x + this._headDriftEuler.x;
+    const neckYaw = this.currentHeadAngles.x + extraHeadEulerOffset.y + this._headDriftEuler.y;
+    const neckRoll = extraHeadEulerOffset.z + this._headDriftEuler.z - this.currentHeadAngles.x * 0.08;
+    this.neckQuat.setFromEuler(this._eulerScratch.setScalar(neckPitch, neckYaw, neckRoll));
   }
 }

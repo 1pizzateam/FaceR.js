@@ -1,0 +1,27 @@
+{
+  "name": "facer-docs",
+  "version": "0.1.0",
+  "description": "Documentation for FaceR.js.",
+  "private": true,
+  "scripts": {
+    "dev": "vitepress dev docs --host --port 5184",
+    "build": "vitepress build docs",
+    "preview": "vitepress preview docs --port 5184"
+  },
+  "author": "Ludovic Cluber",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/1pizzateam/FaceR.js.git",
+    "directory": "website"
+  },
+  "devDependencies": {
+    "typescript": "6.0.3",
+    "vitepress": "1.6.4"
+  },
+  "dependencies": {
+    "@1pizzateam/loopr": "2.2.0",
+    "@1pizzateam/roostr": "0.9.1",
+    "@1pizzateam/spock": "4.6.0"
+  }
+}

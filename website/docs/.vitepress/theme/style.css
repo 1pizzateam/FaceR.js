@@ -1,0 +1,50 @@
+:root {
+  --vp-c-brand-1: #e8590c;
+  --vp-c-brand-2: #f76707;
+  --vp-c-brand-3: #e8590c;
+  --vp-c-brand-soft: rgba(232, 89, 12, 0.14);
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(120deg, #e8590c 30%, #fcc419);
+}
+
+.face-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.face-hero canvas {
+  width: min(380px, 80vw);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 40%, var(--vp-c-bg-soft), var(--vp-c-bg-alt));
+  box-shadow: 0 0 0 1px var(--vp-c-divider), 0 12px 40px rgba(232, 89, 12, 0.18);
+  cursor: crosshair;
+}
+
+.face-hero-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  max-width: 380px;
+}
+
+.face-hero-chip {
+  padding: 4px 11px;
+  font-size: 12.5px;
+  font-weight: 500;
+  border-radius: 999px;
+  border: 1px solid var(--vp-c-divider);
+  background: var(--vp-c-bg);
+  color: var(--vp-c-text-1);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.face-hero-chip:hover { border-color: var(--vp-c-brand-1); color: var(--vp-c-brand-1); }
+.face-hero-chip.active { background: var(--vp-c-brand-1); border-color: var(--vp-c-brand-1); color: #fff; }
+
+.face-hero-caption { font-size: 12px; color: var(--vp-c-text-3); text-align: center; }
