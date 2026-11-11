@@ -9,5 +9,3 @@ Version 0.1.0 (November 7th 2026)
     * Re-exports the `@1pizzateam/spock` math types used by the API (`Vec2`, `Vec3`, `Quat`, …). Requires `@1pizzateam/spock` 4.6.0 (`Mat4x3.transformPoints`, `Mat4x3.transformDirections`, `Vec3.getEllipsoidDistance`).
     * Deformer performance: per-rig lookup tables (pivot vertex lists, neck/jaw weights, trauma falloffs) are cached and the pivot passes run through Spock bulk transforms, about 2–3× faster than the first prototype (`invalidateDeformCache` is exported for manual rest-pose edits).
     * Hardening: non-finite `dt`, weights, intensities and gaze angles are ignored instead of corrupting the mesh; `dt` is clamped to 0.25 s; the impulse queue is capped; malformed `.obj` faces are discarded and an `.obj` with no usable geometry throws.
-    * `european_scan` head derived from a CC BY 3.0 scan, see `NOTICE.md`.
-    * Documentation website (VitePress) with guides, API reference and a live animated FaceR head on the home page.
